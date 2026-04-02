@@ -1,0 +1,1678 @@
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+import {
+  buildHourlyTimeOptions,
+  formatAvailabilityRange,
+  TIME_FIELD_OPTIONS
+} from "@/lib/availability";
+import { printInvoicePdf, printQuotePdf } from "@/lib/documents";
+import { downloadCsv } from "@/lib/export";
+import { getInvoiceStatusLabel } from "@/lib/invoice-helpers";
+import {
+  approveQuote,
+  completeJobAndCreateInvoice,
+  createQuote,
+  declineQuote,
+  loadAppData,
+  markNotificationsRead,
+  recordExpense,
+  recordPayment,
+  saveAppData,
+  sendQuote
+} from "@/lib/storage";
+import {
+  AppData,
+  AvailabilitySlot,
+  ExpenseCategory,
+  PaymentMethod,
+  QuoteLineItem
+} from "@/lib/types";
+
+const starterLine: QuoteLineItem = {
+  id: "line-starter",
+  description: "",
+  qty: 1,
+  unitPrice: 0,
+  amount: 0
+};
+
+export function Dashboard() {
+  const [data, setData] = useState<AppData | null>(null);
+  const [selectedEstimateId, setSelectedEstimateId] = useState("");
+  const [quoteTitle, setQuoteTitle] = useState("");
+  const [quoteLines, setQuoteLines] = useState<QuoteLineItem[]>([starterLine]);
+  const [depositMode, setDepositMode] = useState<"none" | "amount" | "percent">("none");
+  const [depositAmount, setDepositAmount] = useState("");
+  const [depositPercent, setDepositPercent] = useState("");
+  const [contractorSignature, setContractorSignature] = useState("Rooted Representative");
+  const [paymentInvoiceId, setPaymentInvoiceId] = useState("");
+  const [paymentAmount, setPaymentAmount] = useState("");
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("cash");
+  const [paymentNote, setPaymentNote] = useState("");
+  const [paymentMode, setPaymentMode] = useState<"full" | "partial">("full");
+  const [expenseDate, setExpenseDate] = useState(new Date().toISOString().slice(0, 10));
+  const [expenseVendor, setExpenseVendor] = useState("");
+  const [expenseCategory, setExpenseCategory] = useState<ExpenseCategory>("materials");
+  const [expenseAmount, setExpenseAmount] = useState("");
+  const [expenseNote, setExpenseNote] = useState("");
+  const [expenseJobId, setExpenseJobId] = useState("");
+  const [expenseReceiptName, setExpenseReceiptName] = useState("");
+  const [expenseReceiptDataUrl, setExpenseReceiptDataUrl] = useState("");
+  const [siteServiceInput, setSiteServiceInput] = useState("");
+  const [projectTitleInput, setProjectTitleInput] = useState("");
+  const [projectSummaryInput, setProjectSummaryInput] = useState("");
+  const [projectImageDataUrl, setProjectImageDataUrl] = useState("");
+  const [projectImageName, setProjectImageName] = useState("");
+  const [showSiteEditor, setShowSiteEditor] = useState(false);
+  const [showAvailabilityEditor, setShowAvailabilityEditor] = useState(false);
+  const [browserAlertsEnabled, setBrowserAlertsEnabled] = useState(false);
+  const [showPaidInvoices, setShowPaidInvoices] = useState(false);
+
+  useEffect(() => {
+    setData(loadAppData());
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof Notification === "undefined") {
+      return;
+    }
+
+    setBrowserAlertsEnabled(Notification.permission === "granted");
+  }, []);
+
+  const estimateOptions = useMemo(() => {
+    if (!data) {
+      return [];
+    }
+
+    return data.estimateRequests.map((estimate) => {
+      const customer = data.customers.find((item) => item.id === estimate.customerId);
+      const requestCount = data.estimateRequests.filter(
+        (item) => item.customerId === estimate.customerId
+      ).length;
+      return {
+        ...estimate,
+        customerName: customer?.fullName ?? "Unknown customer",
+        isRepeatCustomer: requestCount > 1,
+        requestCount
+      };
+    });
+  }, [data]);
+
+  useEffect(() => {
+    if (!data || !selectedEstimateId) {
+      return;
+    }
+
+    const estimate = data.estimateRequests.find((item) => item.id === selectedEstimateId);
+    if (estimate) {
+      setQuoteTitle(estimate.jobType);
+    }
+  }, [data, selectedEstimateId]);
+
+  const leadCustomers = useMemo(
+    () => data?.customers.filter((customer) => customer.lifecycle === "lead") ?? [],
+    [data]
+  );
+
+  const activeCustomers = useMemo(
+    () => data?.customers.filter((customer) => customer.lifecycle === "active") ?? [],
+    [data]
+  );
+
+  const archivedCustomers = useMemo(
+    () => data?.customers.filter((customer) => customer.lifecycle === "archived") ?? [],
+    [data]
+  );
+
+  const totals = useMemo(() => {
+    if (!data) {
+      return {
+        totalLeads: 0,
+        activeQuotes: 0,
+        completedJobs: 0,
+        unpaidInvoices: 0,
+        collected: 0,
+        expenses: 0
+      };
+    }
+
+    return {
+      totalLeads: data.estimateRequests.length,
+      activeQuotes: data.quotes.filter((quote) => quote.status === "sent").length,
+      completedJobs: data.jobs.filter((job) => job.status === "completed").length,
+      unpaidInvoices: data.invoices.filter((invoice) => invoice.status !== "paid").length,
+      collected: data.payments.reduce((sum, payment) => sum + payment.amount, 0),
+      expenses: data.expenses.reduce((sum, expense) => sum + expense.amount, 0)
+    };
+  }, [data]);
+
+  const unreadNotifications = useMemo(
+    () => data?.notifications.filter((notification) => !notification.read) ?? [],
+    [data]
+  );
+
+  const activeInvoices = useMemo(
+    () => data?.invoices.filter((invoice) => invoice.status !== "paid") ?? [],
+    [data]
+  );
+
+  const paidInvoices = useMemo(
+    () => data?.invoices.filter((invoice) => invoice.status === "paid") ?? [],
+    [data]
+  );
+
+  useEffect(() => {
+    if (!browserAlertsEnabled || typeof window === "undefined" || typeof Notification === "undefined") {
+      return;
+    }
+
+    unreadNotifications.forEach((notification) => {
+      const browserNotificationKey = `browser-alert-${notification.id}`;
+      if (window.sessionStorage.getItem(browserNotificationKey)) {
+        return;
+      }
+
+      new Notification(notification.title, {
+        body: notification.message
+      });
+      window.sessionStorage.setItem(browserNotificationKey, "shown");
+    });
+  }, [browserAlertsEnabled, unreadNotifications]);
+
+  if (!data) {
+    return <section className="panel">Loading dashboard...</section>;
+  }
+
+  function persist(nextData: AppData) {
+    setData(nextData);
+    saveAppData(nextData);
+  }
+
+  async function enableBrowserAlerts() {
+    if (typeof window === "undefined" || typeof Notification === "undefined") {
+      return;
+    }
+
+    const result = await Notification.requestPermission();
+    setBrowserAlertsEnabled(result === "granted");
+  }
+
+  function markAllNotificationsSeen() {
+    if (!data || !unreadNotifications.length) {
+      return;
+    }
+
+    persist(markNotificationsRead(data, unreadNotifications.map((notification) => notification.id)));
+  }
+
+  function updateLine(index: number, field: keyof QuoteLineItem, value: string) {
+    setQuoteLines((current) =>
+      current.map((line, currentIndex) => {
+        if (currentIndex !== index) {
+          return line;
+        }
+
+        if (field === "description") {
+          return { ...line, description: value };
+        }
+
+        const numericValue = Number(value);
+        const next = {
+          ...line,
+          [field]: numericValue
+        } as QuoteLineItem;
+        return {
+          ...next,
+          amount: (field === "qty" ? numericValue : next.qty) * (field === "unitPrice" ? numericValue : next.unitPrice)
+        };
+      })
+    );
+  }
+
+  function addLine() {
+    setQuoteLines((current) => [
+      ...current,
+      {
+        id: `line-${current.length + 1}`,
+        description: "",
+        qty: 1,
+        unitPrice: 0,
+        amount: 0
+      }
+    ]);
+  }
+
+  function handleCreateQuote(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!data) {
+      return;
+    }
+
+    const estimate = data.estimateRequests.find((item) => item.id === selectedEstimateId);
+    if (!estimate) {
+      return;
+    }
+
+    const lineItems = quoteLines.filter((line) => line.description.trim().length > 0);
+    if (!lineItems.length) {
+      return;
+    }
+
+    const customer = data.customers.find((item) => item.id === estimate.customerId);
+    if (!customer) {
+      return;
+    }
+
+    const nextData = createQuote(data, {
+      customerId: estimate.customerId,
+      estimateRequestId: estimate.id,
+      customerName: customer.fullName,
+      customerAddress: customer.address,
+      customerPhone: customer.phone,
+      customerEmail: customer.email,
+      projectTitle: quoteTitle || estimate.jobType,
+      scope: estimate.description,
+      items: lineItems,
+      depositType:
+        depositMode === "none"
+          ? "none"
+          : depositMode === "percent"
+            ? "percent"
+            : "fixed",
+      depositAmount:
+        depositMode === "amount"
+          ? Number(depositAmount || 0)
+          : depositMode === "percent"
+            ? (lineItems.reduce((sum, item) => sum + item.amount, 0) * Number(depositPercent || 0)) / 100
+            : 0,
+      depositPercent: depositMode === "percent" ? Number(depositPercent || 0) : 0,
+      depositRequired:
+        depositMode === "amount"
+          ? Number(depositAmount || 0) > 0
+          : depositMode === "percent"
+            ? Number(depositPercent || 0) > 0
+            : false,
+      rootedSignature: contractorSignature
+    });
+
+    persist(nextData);
+    setQuoteTitle("");
+    setSelectedEstimateId("");
+    setQuoteLines([starterLine]);
+    setDepositMode("none");
+    setDepositAmount("");
+    setDepositPercent("");
+    setContractorSignature("Rooted Representative");
+  }
+
+  function handleRecordPayment(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!data) {
+      return;
+    }
+
+    if (!paymentInvoiceId) {
+      return;
+    }
+
+    const invoice = data.invoices.find((item) => item.id === paymentInvoiceId);
+    if (!invoice) {
+      return;
+    }
+
+    const amountToRecord =
+      paymentMode === "full" ? invoice.balanceDue : Number(paymentAmount || 0);
+
+    if (!amountToRecord || amountToRecord <= 0) {
+      return;
+    }
+
+    const nextData = recordPayment(data, {
+      invoiceId: paymentInvoiceId,
+      amount: amountToRecord,
+      method: paymentMethod,
+      note: paymentNote || (paymentMode === "full" ? "Marked paid in full" : "Partial payment")
+    });
+
+    persist(nextData);
+    setPaymentAmount("");
+    setPaymentInvoiceId("");
+    setPaymentMethod("cash");
+    setPaymentNote("");
+    setPaymentMode("full");
+  }
+
+  function handleReceiptUpload(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file) {
+      setExpenseReceiptName("");
+      setExpenseReceiptDataUrl("");
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === "string") {
+        setExpenseReceiptName(file.name);
+        setExpenseReceiptDataUrl(reader.result);
+      }
+    };
+    reader.readAsDataURL(file);
+  }
+
+  function handleRecordExpense(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!data || !expenseVendor || !expenseAmount) {
+      return;
+    }
+
+    const nextData = recordExpense(data, {
+      expenseDate,
+      vendor: expenseVendor,
+      category: expenseCategory,
+      amount: Number(expenseAmount),
+      note: expenseNote,
+      linkedJobId: expenseJobId || undefined,
+      receiptName: expenseReceiptName || undefined,
+      receiptDataUrl: expenseReceiptDataUrl || undefined
+    });
+
+    persist(nextData);
+    setExpenseDate(new Date().toISOString().slice(0, 10));
+    setExpenseVendor("");
+    setExpenseCategory("materials");
+    setExpenseAmount("");
+    setExpenseNote("");
+    setExpenseJobId("");
+    setExpenseReceiptName("");
+    setExpenseReceiptDataUrl("");
+  }
+
+  function updateSiteContentField<
+    K extends keyof AppData["siteContent"]
+  >(key: K, value: AppData["siteContent"][K]) {
+    if (!data) {
+      return;
+    }
+
+    persist({
+      ...data,
+      siteContent: {
+        ...data.siteContent,
+        [key]: value
+      }
+    });
+  }
+
+  function addService() {
+    if (!data || !siteServiceInput.trim()) {
+      return;
+    }
+
+    updateSiteContentField("services", [...data.siteContent.services, siteServiceInput.trim()]);
+    setSiteServiceInput("");
+  }
+
+  function removeService(service: string) {
+    if (!data) {
+      return;
+    }
+
+    updateSiteContentField(
+      "services",
+      data.siteContent.services.filter((item) => item !== service)
+    );
+  }
+
+  function addFeaturedProject() {
+    if (!data || !projectTitleInput.trim() || !projectSummaryInput.trim()) {
+      return;
+    }
+
+    updateSiteContentField("featuredProjects", [
+      ...data.siteContent.featuredProjects,
+      {
+        id: `project-${Date.now()}`,
+        title: projectTitleInput.trim(),
+        summary: projectSummaryInput.trim(),
+        imageDataUrl: projectImageDataUrl || undefined
+      }
+    ]);
+    setProjectTitleInput("");
+    setProjectSummaryInput("");
+    setProjectImageDataUrl("");
+    setProjectImageName("");
+  }
+
+  function removeFeaturedProject(projectId: string) {
+    if (!data) {
+      return;
+    }
+
+    updateSiteContentField(
+      "featuredProjects",
+      data.siteContent.featuredProjects.filter((project) => project.id !== projectId)
+    );
+  }
+
+  function handleProjectImageUpload(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file) {
+      setProjectImageDataUrl("");
+      setProjectImageName("");
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === "string") {
+        setProjectImageDataUrl(reader.result);
+        setProjectImageName(file.name);
+      }
+    };
+    reader.readAsDataURL(file);
+  }
+
+  function updateAvailabilitySlot(weekday: string, updates: Partial<AvailabilitySlot>) {
+    if (!data) {
+      return;
+    }
+
+    const nextData = {
+      ...data,
+      availability: data.availability.map((slot) =>
+        slot.weekday === weekday ? { ...slot, ...updates } : slot
+      )
+    };
+    persist(nextData);
+  }
+
+  return (
+    <div className="dashboard-grid">
+      <section className="panel quick-actions-panel">
+        <div className="section-heading">
+          <p className="eyebrow">Quick Actions</p>
+          <h2>Jump straight to the next business task.</h2>
+        </div>
+        <div className="quick-actions-grid">
+          <button
+            type="button"
+            className="action-tile action-tile-button"
+            onClick={() => setShowAvailabilityEditor((current) => !current)}
+          >
+            <strong>Edit Estimate Availability</strong>
+            <span>
+              {showAvailabilityEditor
+                ? "Hide weekly estimate scheduling."
+                : "Choose available days and set the estimate hours customers can book."}
+            </span>
+          </button>
+          <button
+            type="button"
+            className="action-tile action-tile-button"
+            onClick={() => setShowSiteEditor((current) => !current)}
+          >
+            <strong>Edit Landing Page</strong>
+            <span>
+              {showSiteEditor
+                ? "Hide website editor."
+                : "Update services, business description, and featured jobs."}
+            </span>
+          </button>
+          <a href="#quote-calculator" className="action-tile">
+            <strong>Create Quote</strong>
+            <span>Price a lead and send the agreement.</span>
+          </a>
+          <a href="#quotes" className="action-tile">
+            <strong>Review Quotes</strong>
+            <span>Approve, deny, or print the customer copy.</span>
+          </a>
+          <a href="#invoices" className="action-tile">
+            <strong>Record Payment</strong>
+            <span>Update invoices and move jobs into history.</span>
+          </a>
+          <a href="#expenses" className="action-tile">
+            <strong>Log Expense</strong>
+            <span>Track receipts and tax-season costs quickly.</span>
+          </a>
+        </div>
+      </section>
+
+      <section className="panel">
+        <div className="section-heading">
+          <p className="eyebrow">Notifications</p>
+          <h2>See new estimate requests as they come in.</h2>
+        </div>
+        <div className="sticky-actions">
+          <div>
+            <strong>{unreadNotifications.length} unread notifications</strong>
+            <p className="hero-card-copy">
+              New estimate requests appear here and can also trigger a browser alert while the dashboard is open.
+            </p>
+          </div>
+          <div className="inline-actions">
+            {!browserAlertsEnabled ? (
+              <button type="button" className="button-secondary" onClick={enableBrowserAlerts}>
+                Enable Browser Alerts
+              </button>
+            ) : (
+              <span className="pill accent-pill">Browser alerts on</span>
+            )}
+            <button
+              type="button"
+              className="button-inline"
+              onClick={markAllNotificationsSeen}
+              disabled={!unreadNotifications.length}
+            >
+              Mark All Read
+            </button>
+          </div>
+        </div>
+        <div className="stack top-gap">
+          {data.notifications.map((notification) => (
+            <article key={notification.id} className="list-card">
+              <div>
+                <h3>{notification.title}</h3>
+                <p>{notification.message}</p>
+                <small>{new Date(notification.createdAt).toLocaleString()}</small>
+              </div>
+              <span className={`pill ${notification.read ? "" : "accent-pill"}`}>
+                {notification.read ? "read" : "new"}
+              </span>
+            </article>
+          ))}
+          {!data.notifications.length ? (
+            <p className="empty-state">New estimate request notifications will show up here.</p>
+          ) : null}
+        </div>
+      </section>
+
+      {showSiteEditor ? (
+        <section className="panel" id="site-content">
+        <div className="section-heading">
+          <p className="eyebrow">Website Content</p>
+          <h2>Update the public landing page as the business grows.</h2>
+        </div>
+        <div className="form-grid">
+          <label className="full-width">
+            Business name
+            <input
+              value={data.siteContent.businessName}
+              onChange={(event) => updateSiteContentField("businessName", event.target.value)}
+            />
+          </label>
+          <label className="full-width">
+            Hero title
+            <input
+              value={data.siteContent.heroTitle}
+              onChange={(event) => updateSiteContentField("heroTitle", event.target.value)}
+            />
+          </label>
+          <label className="full-width">
+            Hero description
+            <textarea
+              rows={3}
+              value={data.siteContent.heroDescription}
+              onChange={(event) => updateSiteContentField("heroDescription", event.target.value)}
+            />
+          </label>
+          <label>
+            Primary CTA label
+            <input
+              value={data.siteContent.primaryCtaLabel}
+              onChange={(event) => updateSiteContentField("primaryCtaLabel", event.target.value)}
+            />
+          </label>
+          <label>
+            Secondary CTA label
+            <input
+              value={data.siteContent.secondaryCtaLabel}
+              onChange={(event) =>
+                updateSiteContentField("secondaryCtaLabel", event.target.value)
+              }
+            />
+          </label>
+          <label className="full-width">
+            About title
+            <input
+              value={data.siteContent.aboutTitle}
+              onChange={(event) => updateSiteContentField("aboutTitle", event.target.value)}
+            />
+          </label>
+          <label className="full-width">
+            About description
+            <textarea
+              rows={4}
+              value={data.siteContent.aboutDescription}
+              onChange={(event) => updateSiteContentField("aboutDescription", event.target.value)}
+            />
+          </label>
+          <label className="full-width">
+            Service area
+            <input
+              value={data.siteContent.serviceArea}
+              onChange={(event) => updateSiteContentField("serviceArea", event.target.value)}
+            />
+          </label>
+          <label className="full-width">
+            Featured section title
+            <input
+              value={data.siteContent.featuredTitle}
+              onChange={(event) => updateSiteContentField("featuredTitle", event.target.value)}
+            />
+          </label>
+          <label className="full-width">
+            Featured section intro
+            <textarea
+              rows={3}
+              value={data.siteContent.featuredIntro}
+              onChange={(event) => updateSiteContentField("featuredIntro", event.target.value)}
+            />
+          </label>
+        </div>
+
+        <div className="editor-grid top-gap">
+          <div className="editor-panel">
+            <div className="section-heading">
+              <p className="eyebrow">Services</p>
+              <h2>List what Rooted offers.</h2>
+            </div>
+            <div className="chip-list">
+              {data.siteContent.services.map((service) => (
+                <div key={service} className="editable-chip">
+                  <span>{service}</span>
+                  <button
+                    type="button"
+                    className="chip-remove"
+                    onClick={() => removeService(service)}
+                  >
+                    Remove
+                  </button>
+                </div>
+              ))}
+            </div>
+            <div className="inline-actions top-gap">
+              <input
+                value={siteServiceInput}
+                onChange={(event) => setSiteServiceInput(event.target.value)}
+                placeholder="Add a service"
+              />
+              <button type="button" className="button-primary" onClick={addService}>
+                Add Service
+              </button>
+            </div>
+          </div>
+
+          <div className="editor-panel">
+            <div className="section-heading">
+              <p className="eyebrow">Featured Jobs</p>
+              <h2>Show finished or example work on the landing page.</h2>
+            </div>
+            <div className="project-stack">
+              {data.siteContent.featuredProjects.map((project) => (
+                <article key={project.id} className="project-card dashboard-project-card">
+                  <strong>{project.title}</strong>
+                  <p>{project.summary}</p>
+                  <button
+                    type="button"
+                    className="button-secondary"
+                    onClick={() => removeFeaturedProject(project.id)}
+                  >
+                    Remove
+                  </button>
+                </article>
+              ))}
+            </div>
+            <div className="form-grid top-gap">
+              <label className="full-width">
+                Project title
+                <input
+                  value={projectTitleInput}
+                  onChange={(event) => setProjectTitleInput(event.target.value)}
+                />
+              </label>
+              <label className="full-width">
+                Project summary
+                <textarea
+                  rows={3}
+                  value={projectSummaryInput}
+                  onChange={(event) => setProjectSummaryInput(event.target.value)}
+                />
+              </label>
+              <label className="full-width">
+                Project photo
+                <input type="file" accept="image/*" onChange={handleProjectImageUpload} />
+              </label>
+              {projectImageName ? (
+                <div className="full-width upload-note">Attached project photo: {projectImageName}</div>
+              ) : null}
+              <div className="full-width form-actions">
+                <button type="button" className="button-primary" onClick={addFeaturedProject}>
+                  Add Featured Job
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+      ) : null}
+
+      {showAvailabilityEditor ? (
+        <section className="panel" id="availability-settings">
+          <div className="section-heading">
+            <p className="eyebrow">Estimate Availability</p>
+            <h2>Set the days and hours customers can request estimates.</h2>
+          </div>
+          <div className="availability-grid">
+            {data.availability.map((slot) => {
+              const hourlyOptions = buildHourlyTimeOptions(slot);
+
+              return (
+                <article key={slot.id} className="availability-card availability-editor-card">
+                  <div className="availability-card-head">
+                    <div>
+                      <strong>{slot.weekday}</strong>
+                      <p className="availability-range">
+                        {slot.isAvailable
+                          ? formatAvailabilityRange(slot.start, slot.end)
+                          : "Unavailable"}
+                      </p>
+                    </div>
+                    <span className={`pill ${slot.isAvailable ? "accent-pill" : ""}`}>
+                      {slot.isAvailable ? `${hourlyOptions.length} time options` : "Unavailable"}
+                    </span>
+                  </div>
+
+                  <label>
+                    Availability
+                    <select
+                      value={slot.isAvailable ? "available" : "unavailable"}
+                      onChange={(event) =>
+                        updateAvailabilitySlot(slot.weekday, {
+                          isAvailable: event.target.value === "available"
+                        })
+                      }
+                    >
+                      <option value="available">Available</option>
+                      <option value="unavailable">Unavailable</option>
+                    </select>
+                  </label>
+
+                  {slot.isAvailable ? (
+                    <div className="availability-time-grid">
+                      <label>
+                        Start time
+                        <select
+                          value={slot.start}
+                          onChange={(event) =>
+                            updateAvailabilitySlot(slot.weekday, { start: event.target.value })
+                          }
+                        >
+                          {TIME_FIELD_OPTIONS.map((option) => (
+                            <option key={`${slot.weekday}-start-${option.value}`} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label>
+                        End time
+                        <select
+                          value={slot.end}
+                          onChange={(event) =>
+                            updateAvailabilitySlot(slot.weekday, { end: event.target.value })
+                          }
+                        >
+                          {TIME_FIELD_OPTIONS.map((option) => (
+                            <option key={`${slot.weekday}-end-${option.value}`} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    </div>
+                  ) : null}
+
+                  <p className="status-note">
+                    {slot.isAvailable
+                      ? hourlyOptions.length
+                        ? `Customers can choose hourly estimate times on ${slot.weekday}.`
+                        : "Set the end time later than the start time to create hourly options."
+                      : `Customers will not see ${slot.weekday} as a booking option.`}
+                  </p>
+                </article>
+              );
+            })}
+          </div>
+        </section>
+      ) : null}
+
+      <section className="panel summary-grid">
+        <div className="summary-card">
+          <span>Total leads</span>
+          <strong>{totals.totalLeads}</strong>
+        </div>
+        <div className="summary-card">
+          <span>Quotes sent</span>
+          <strong>{totals.activeQuotes}</strong>
+        </div>
+        <div className="summary-card">
+          <span>Completed jobs</span>
+          <strong>{totals.completedJobs}</strong>
+        </div>
+        <div className="summary-card">
+          <span>Unpaid invoices</span>
+          <strong>{totals.unpaidInvoices}</strong>
+        </div>
+        <div className="summary-card accent">
+          <span>Payments recorded</span>
+          <strong>${totals.collected.toFixed(2)}</strong>
+        </div>
+        <div className="summary-card">
+          <span>Expenses tracked</span>
+          <strong>${totals.expenses.toFixed(2)}</strong>
+        </div>
+      </section>
+
+      <section className="panel">
+        <div className="section-heading">
+          <p className="eyebrow">Leads</p>
+          <h2>People waiting on an estimate or quote decision.</h2>
+        </div>
+        <div className="stack">
+          {leadCustomers.map((customer) => (
+            <article key={customer.id} className="list-card">
+              <div>
+                <h3>{customer.fullName}</h3>
+                <p>
+                  {customer.phone} • {customer.email}
+                </p>
+                <small>{customer.address}</small>
+              </div>
+              <span className="pill">lead</span>
+            </article>
+          ))}
+          {!leadCustomers.length ? <p className="empty-state">No open leads right now.</p> : null}
+        </div>
+      </section>
+
+      <section className="panel">
+        <div className="section-heading">
+          <p className="eyebrow">Active Customers</p>
+          <h2>Approved quotes become active customers while work and payment are in progress.</h2>
+        </div>
+        <div className="stack">
+          {activeCustomers.map((customer) => (
+            <article key={customer.id} className="list-card">
+              <div>
+                <h3>{customer.fullName}</h3>
+                <p>
+                  {customer.phone} • {customer.email}
+                </p>
+                <small>{customer.address}</small>
+              </div>
+              <span className="pill">{customer.preferredContact}</span>
+            </article>
+          ))}
+          {!activeCustomers.length ? (
+            <p className="empty-state">No active customers yet.</p>
+          ) : null}
+        </div>
+      </section>
+
+      <section className="panel">
+        <div className="section-heading">
+          <p className="eyebrow">Past Customers</p>
+          <h2>Once payment is fully collected, the customer record moves here for history.</h2>
+        </div>
+        <div className="stack">
+          {archivedCustomers.map((customer) => (
+            <article key={customer.id} className="list-card">
+              <div>
+                <h3>{customer.fullName}</h3>
+                <p>
+                  {customer.phone} • {customer.email}
+                </p>
+                <small>{customer.address}</small>
+              </div>
+              <span className="pill">archived</span>
+            </article>
+          ))}
+          {!archivedCustomers.length ? (
+            <p className="empty-state">No archived customers yet.</p>
+          ) : null}
+        </div>
+      </section>
+
+      <section className="panel">
+        <div className="section-heading">
+          <p className="eyebrow">Estimate Queue</p>
+          <h2>New leads and scheduled estimate requests</h2>
+        </div>
+        <div className="stack">
+          {estimateOptions.map((estimate) => (
+            <article key={estimate.id} className="list-card">
+              <div>
+                <h3>{estimate.customerName}</h3>
+                <p>{estimate.jobType}</p>
+                <small>
+                  {estimate.preferredSlot} • {estimate.serviceAddress}
+                </small>
+                {estimate.isRepeatCustomer ? (
+                  <div className="status-note">Repeat customer • {estimate.requestCount} total requests</div>
+                ) : null}
+              </div>
+              <div className="action-stack compact-stack">
+                {estimate.isRepeatCustomer ? (
+                  <span className="pill accent-pill">repeat customer</span>
+                ) : null}
+                <span className="pill">{estimate.status}</span>
+              </div>
+            </article>
+          ))}
+        </div>
+      </section>
+
+      <section className="panel" id="quote-calculator">
+        <div className="section-heading">
+          <p className="eyebrow">Quote Calculator</p>
+          <h2>Start with a lead, price the work, and turn it into a job later.</h2>
+        </div>
+        <form className="form-grid" onSubmit={handleCreateQuote}>
+          <label className="full-width">
+            Estimate request
+            <select
+              value={selectedEstimateId}
+              onChange={(event) => setSelectedEstimateId(event.target.value)}
+              required
+            >
+              <option value="">Choose a lead</option>
+              {estimateOptions.map((estimate) => (
+                <option key={estimate.id} value={estimate.id}>
+                  {estimate.customerName} - {estimate.jobType}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="full-width">
+            Quote title
+            <input
+              value={quoteTitle}
+              onChange={(event) => setQuoteTitle(event.target.value)}
+              placeholder="Auto-filled from job type"
+            />
+          </label>
+          <label className="full-width">
+            Scope of work
+            <textarea
+              rows={4}
+              value={
+                data?.estimateRequests.find((item) => item.id === selectedEstimateId)?.description ?? ""
+              }
+              readOnly
+            />
+          </label>
+          <label>
+            Deposit
+            <select
+              value={depositMode}
+              onChange={(event) =>
+                setDepositMode(event.target.value as "none" | "amount" | "percent")
+              }
+            >
+              <option value="none">No deposit</option>
+              <option value="amount">Fixed deposit amount</option>
+              <option value="percent">Percentage deposit</option>
+            </select>
+          </label>
+          <label>
+            {depositMode === "percent" ? "Deposit percent" : "Deposit amount"}
+            <input
+              type="number"
+              min="0"
+              step={depositMode === "percent" ? "1" : "0.01"}
+              max={depositMode === "percent" ? "100" : undefined}
+              value={depositMode === "percent" ? depositPercent : depositAmount}
+              onChange={(event) =>
+                depositMode === "percent"
+                  ? setDepositPercent(event.target.value)
+                  : setDepositAmount(event.target.value)
+              }
+              disabled={depositMode === "none"}
+              placeholder={depositMode === "percent" ? "20" : "0.00"}
+            />
+          </label>
+          <label>
+            Rooted signature
+            <input
+              value={contractorSignature}
+              onChange={(event) => setContractorSignature(event.target.value)}
+              placeholder="Owner or representative"
+            />
+          </label>
+
+          <div className="full-width stack">
+            {quoteLines.map((line, index) => (
+              <div key={line.id} className="line-item-grid">
+                <input
+                  placeholder="Line item"
+                  value={line.description}
+                  onChange={(event) => updateLine(index, "description", event.target.value)}
+                />
+                <input
+                  type="number"
+                  min="1"
+                  value={line.qty}
+                  onChange={(event) => updateLine(index, "qty", event.target.value)}
+                />
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={line.unitPrice}
+                  onChange={(event) => updateLine(index, "unitPrice", event.target.value)}
+                />
+              </div>
+            ))}
+            <div className="inline-actions">
+              <button type="button" className="button-secondary" onClick={addLine}>
+                Add line item
+              </button>
+            </div>
+          </div>
+
+          <div className="full-width form-actions sticky-actions">
+            <button type="button" className="button-secondary" onClick={addLine}>
+              Add Line
+            </button>
+            <button type="submit" className="button-primary">
+              Save Quote
+            </button>
+          </div>
+        </form>
+      </section>
+
+      <section className="panel" id="quotes">
+        <div className="section-heading">
+          <p className="eyebrow">Quotes</p>
+          <h2>Each quote needs a decision: approve it or remove the lead.</h2>
+        </div>
+        <div className="stack">
+          {data.quotes.map((quote) => {
+            const customer = data.customers.find((item) => item.id === quote.customerId);
+            return (
+              <article key={quote.id} className="list-card split-card action-card">
+                <div className="card-copy">
+                  <h3>{quote.projectTitle}</h3>
+                  <p>{quote.customerName}</p>
+                  <small>
+                    ${quote.total.toFixed(2)}
+                    {quote.depositRequired
+                      ? quote.depositType === "percent" && quote.depositPercent
+                        ? ` • Deposit ${quote.depositPercent}% ($${quote.depositAmount.toFixed(2)})`
+                        : ` • Deposit $${quote.depositAmount.toFixed(2)}`
+                      : " • No deposit"}
+                  </small>
+                  <div className="timestamp-list">
+                    <span>Created {quote.createdAt}</span>
+                    {quote.approvedAt ? <span>Approved {quote.approvedAt}</span> : null}
+                    {quote.customerSignedAt ? <span>Customer signed {quote.customerSignedAt}</span> : null}
+                    {quote.rootedSignedAt ? <span>Rooted signed {quote.rootedSignedAt}</span> : null}
+                    {quote.completedAt ? <span>Completed {quote.completedAt}</span> : null}
+                  </div>
+                </div>
+                <div className="action-stack">
+                  <span className={`pill ${quote.status === "approved" ? "accent-pill" : ""}`}>
+                    {quote.status}
+                  </span>
+                  <div className="action-row">
+                    <button
+                      type="button"
+                      className="button-secondary"
+                      onClick={() => printQuotePdf(quote, customer)}
+                    >
+                      PDF
+                    </button>
+                    {quote.status === "draft" ? (
+                      <button
+                        type="button"
+                        className="button-primary"
+                        onClick={() => persist(sendQuote(data, quote.id))}
+                      >
+                        Mark Sent
+                      </button>
+                    ) : null}
+                    {quote.status === "sent" ? (
+                      <button
+                        type="button"
+                        className="button-primary"
+                        onClick={() => persist(approveQuote(data, quote.id))}
+                      >
+                        Approve
+                      </button>
+                    ) : null}
+                    {quote.status === "sent" ? (
+                      <button
+                        type="button"
+                        className="button-danger"
+                        onClick={() => persist(declineQuote(data, quote.id))}
+                      >
+                        Deny
+                      </button>
+                    ) : null}
+                    {quote.status === "approved" ? (
+                      <button
+                        type="button"
+                        className="button-primary"
+                        onClick={() => {
+                          const job = data.jobs.find((item) => item.quoteId === quote.id);
+                          if (job) {
+                            persist(completeJobAndCreateInvoice(data, job.id));
+                          }
+                        }}
+                      >
+                        Completed
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+              </article>
+            );
+          })}
+        </div>
+      </section>
+
+      <section className="panel">
+        <div className="section-heading">
+          <p className="eyebrow">Jobs</p>
+          <h2>Approved work becomes a job and can generate an invoice.</h2>
+        </div>
+        <div className="stack">
+          {data.jobs.map((job) => {
+            const customer = data.customers.find((item) => item.id === job.customerId);
+            const quote = data.quotes.find((item) => item.id === job.quoteId);
+            return (
+              <article key={job.id} className="list-card split-card action-card">
+                <div className="card-copy">
+                  <h3>{job.title}</h3>
+                  <p>{customer?.fullName}</p>
+                  <small>Scheduled {job.scheduledDate}</small>
+                </div>
+                <div className="action-stack">
+                  <span className="pill">{job.status}</span>
+                  <div className="action-row">
+                    {quote ? (
+                      <button
+                        type="button"
+                        className="button-secondary"
+                        onClick={() => printQuotePdf(quote, customer)}
+                      >
+                        Quote PDF
+                      </button>
+                    ) : null}
+                    {job.status !== "completed" ? (
+                      <button
+                        type="button"
+                        className="button-primary"
+                        onClick={() => persist(completeJobAndCreateInvoice(data, job.id))}
+                      >
+                        Complete Job
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+              </article>
+            );
+          })}
+        </div>
+      </section>
+
+      <section className="panel" id="invoices">
+        <div className="section-heading">
+          <p className="eyebrow">Invoices and Payments</p>
+          <h2>Track what is owed now, then add payment processing later.</h2>
+        </div>
+        <div className="stack">
+          {activeInvoices.map((invoice) => {
+            const customer = data.customers.find((item) => item.id === invoice.customerId);
+            const quote = data.quotes.find(
+              (item) => item.id === (invoice.relatedQuoteId ?? invoice.quoteId)
+            );
+            const job = data.jobs.find((item) => item.id === invoice.jobId);
+            const relatedReference = invoice.relatedWorkAuthorizationId
+              ? `Work Authorization ID: ${invoice.relatedWorkAuthorizationId}`
+              : invoice.relatedQuoteId
+                ? `Related Quote ID: ${invoice.relatedQuoteId}`
+                : "";
+            return (
+              <article key={invoice.id} className="list-card split-card action-card">
+                <div className="card-copy">
+                  <h3>{invoice.projectTitle || customer?.fullName}</h3>
+                  <p>Invoice {invoice.id}</p>
+                  <small>
+                    ${invoice.total.toFixed(2)} total • ${invoice.amountPaid.toFixed(2)} paid • $
+                    {invoice.balanceDue.toFixed(2)} due
+                  </small>
+                  <div className="timestamp-list">
+                    <span>Issued {invoice.issuedAt || invoice.issueDate}</span>
+                    <span>Due {invoice.dueAt || invoice.dueDate}</span>
+                    {invoice.jobDate ? <span>Job {invoice.jobDate}</span> : null}
+                  </div>
+                  <div className="invoice-meta-grid">
+                    <span>Billing: {invoice.billingAddress}</span>
+                    <span>Service: {invoice.serviceAddress || invoice.billingAddress}</span>
+                    {relatedReference ? <span>{relatedReference}</span> : null}
+                  </div>
+                </div>
+                <div className="action-stack">
+                  <span className={`pill ${invoice.status === "paid" ? "accent-pill" : ""}`}>
+                    {getInvoiceStatusLabel(invoice.status)}
+                  </span>
+                  <div className="action-row">
+                    <button
+                      type="button"
+                      className="button-secondary"
+                      onClick={() => printInvoicePdf(invoice, quote, customer, job)}
+                    >
+                      Invoice PDF
+                    </button>
+                    {invoice.status !== "void" ? (
+                      <button
+                        type="button"
+                        className="button-secondary"
+                        onClick={() =>
+                          persist({
+                            ...data,
+                            invoices: data.invoices.map((item) =>
+                              item.id === invoice.id ? { ...item, status: "void" } : item
+                            )
+                          })
+                        }
+                      >
+                        Void
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+              </article>
+            );
+          })}
+          {!activeInvoices.length ? (
+            <p className="empty-state">No active invoices right now.</p>
+          ) : null}
+        </div>
+
+        <div className="top-gap">
+          <button
+            type="button"
+            className="button-inline"
+            onClick={() => setShowPaidInvoices((current) => !current)}
+          >
+            {showPaidInvoices
+              ? `Hide Paid Invoices (${paidInvoices.length})`
+              : `Paid Invoices (${paidInvoices.length})`}
+          </button>
+        </div>
+
+        {showPaidInvoices ? (
+          <div className="stack top-gap">
+            {paidInvoices.map((invoice) => {
+              const customer = data.customers.find((item) => item.id === invoice.customerId);
+              const quote = data.quotes.find(
+                (item) => item.id === (invoice.relatedQuoteId ?? invoice.quoteId)
+              );
+              const job = data.jobs.find((item) => item.id === invoice.jobId);
+              return (
+                <article key={invoice.id} className="list-card split-card action-card">
+                  <div className="card-copy">
+                    <h3>{invoice.projectTitle || customer?.fullName}</h3>
+                    <p>Invoice {invoice.id}</p>
+                    <small>
+                      ${invoice.total.toFixed(2)} total • ${invoice.amountPaid.toFixed(2)} paid
+                    </small>
+                  </div>
+                  <div className="action-stack">
+                    <span className="pill accent-pill">{getInvoiceStatusLabel(invoice.status)}</span>
+                    <div className="action-row">
+                      <button
+                        type="button"
+                        className="button-secondary"
+                        onClick={() => printInvoicePdf(invoice, quote, customer, job)}
+                      >
+                        Invoice PDF
+                      </button>
+                    </div>
+                  </div>
+                </article>
+              );
+            })}
+            {!paidInvoices.length ? (
+              <p className="empty-state">No paid invoices yet.</p>
+            ) : null}
+          </div>
+        ) : null}
+
+        <form className="form-grid top-gap" onSubmit={handleRecordPayment}>
+          <label>
+            Invoice
+            <select
+              value={paymentInvoiceId}
+              onChange={(event) => setPaymentInvoiceId(event.target.value)}
+              required
+            >
+              <option value="">Choose invoice</option>
+              {activeInvoices
+                .filter((invoice) => invoice.status !== "void")
+                .map((invoice) => (
+                <option key={invoice.id} value={invoice.id}>
+                  {invoice.id} - ${invoice.balanceDue.toFixed(2)} due
+                </option>
+                ))}
+            </select>
+          </label>
+          <label>
+            Payment Type
+            <select
+              value={paymentMode}
+              onChange={(event) => setPaymentMode(event.target.value as "full" | "partial")}
+            >
+              <option value="full">Paid in Full</option>
+              <option value="partial">Partial Payment</option>
+            </select>
+          </label>
+          <label>
+            Amount received
+            <input
+              type="number"
+              step="0.01"
+              min="0"
+              value={paymentAmount}
+              onChange={(event) => setPaymentAmount(event.target.value)}
+              required={paymentMode === "partial"}
+              disabled={paymentMode === "full"}
+              placeholder={paymentMode === "full" ? "Auto-fills remaining balance" : "Enter amount"}
+            />
+          </label>
+          <label>
+            Method
+            <select
+              value={paymentMethod}
+              onChange={(event) => setPaymentMethod(event.target.value as PaymentMethod)}
+            >
+              <option value="cash">Cash</option>
+              <option value="check">Check</option>
+              <option value="venmo">Venmo</option>
+              <option value="zelle">Zelle</option>
+              <option value="other">Other</option>
+            </select>
+          </label>
+          <label className="full-width">
+            Note
+            <input
+              value={paymentNote}
+              onChange={(event) => setPaymentNote(event.target.value)}
+              placeholder="Check #1042, cash at completion, etc."
+            />
+          </label>
+          <div className="full-width form-actions">
+            <button type="submit" className="button-primary">
+              {paymentMode === "full" ? "Mark Paid in Full" : "Record Partial Payment"}
+            </button>
+          </div>
+        </form>
+      </section>
+
+      <section className="panel" id="expenses">
+        <div className="section-heading">
+          <p className="eyebrow">Expenses</p>
+          <h2>Track materials, fuel, tools, and other costs for tax season.</h2>
+        </div>
+        <div className="stack">
+          {data.expenses.map((expense) => {
+            const linkedJob = data.jobs.find((job) => job.id === expense.linkedJobId);
+            return (
+              <article key={expense.id} className="list-card split-card action-card">
+                <div className="card-copy">
+                  <h3>{expense.vendor}</h3>
+                  <p>
+                    {expense.category} • {expense.expenseDate}
+                  </p>
+                  <small>
+                    {expense.note || "No note added"}
+                    {linkedJob ? ` • Linked to ${linkedJob.title}` : ""}
+                  </small>
+                  {expense.receiptDataUrl ? (
+                    <div className="receipt-links">
+                      <a
+                        href={expense.receiptDataUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-link"
+                      >
+                        View receipt{expense.receiptName ? `: ${expense.receiptName}` : ""}
+                      </a>
+                    </div>
+                  ) : null}
+                </div>
+                <div className="action-stack">
+                  <span className="pill">${expense.amount.toFixed(2)}</span>
+                  {expense.receiptDataUrl ? (
+                    <div className="action-row">
+                      <a
+                        href={expense.receiptDataUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="button-inline"
+                      >
+                        Receipt
+                      </a>
+                    </div>
+                  ) : null}
+                </div>
+              </article>
+            );
+          })}
+        </div>
+
+        <form className="form-grid top-gap" onSubmit={handleRecordExpense}>
+          <label>
+            Expense date
+            <input
+              type="date"
+              value={expenseDate}
+              onChange={(event) => setExpenseDate(event.target.value)}
+              required
+            />
+          </label>
+          <label>
+            Vendor
+            <input
+              value={expenseVendor}
+              onChange={(event) => setExpenseVendor(event.target.value)}
+              placeholder="Home Depot, gas station, equipment rental..."
+              required
+            />
+          </label>
+          <label>
+            Category
+            <select
+              value={expenseCategory}
+              onChange={(event) => setExpenseCategory(event.target.value as ExpenseCategory)}
+            >
+              <option value="materials">Materials</option>
+              <option value="equipment">Equipment</option>
+              <option value="fuel">Fuel</option>
+              <option value="labor">Labor</option>
+              <option value="marketing">Marketing</option>
+              <option value="insurance">Insurance</option>
+              <option value="software">Software</option>
+              <option value="other">Other</option>
+            </select>
+          </label>
+          <label>
+            Amount
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              value={expenseAmount}
+              onChange={(event) => setExpenseAmount(event.target.value)}
+              required
+            />
+          </label>
+          <label className="full-width">
+            Link to job
+            <select value={expenseJobId} onChange={(event) => setExpenseJobId(event.target.value)}>
+              <option value="">No job linked</option>
+              {data.jobs.map((job) => (
+                <option key={job.id} value={job.id}>
+                  {job.title}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="full-width">
+            Note
+            <input
+              value={expenseNote}
+              onChange={(event) => setExpenseNote(event.target.value)}
+              placeholder="What was purchased and why?"
+            />
+          </label>
+          <label className="full-width">
+            Receipt attachment
+            <input type="file" accept="image/*,.pdf" onChange={handleReceiptUpload} />
+          </label>
+          {expenseReceiptName ? (
+            <div className="full-width upload-note">Attached receipt: {expenseReceiptName}</div>
+          ) : null}
+          <div className="full-width form-actions">
+            <button type="submit">Record Expense</button>
+          </div>
+        </form>
+      </section>
+
+      <section className="panel">
+        <div className="section-heading">
+          <p className="eyebrow">Tax Season Snapshot</p>
+          <h2>Simple reporting that can be exported later.</h2>
+        </div>
+        <div className="report-grid">
+          <div>
+            <span>Invoices created</span>
+            <strong>{data.invoices.length}</strong>
+          </div>
+          <div>
+            <span>Payments recorded</span>
+            <strong>{data.payments.length}</strong>
+          </div>
+          <div>
+            <span>Revenue logged</span>
+            <strong>${totals.collected.toFixed(2)}</strong>
+          </div>
+          <div>
+            <span>Expenses logged</span>
+            <strong>${totals.expenses.toFixed(2)}</strong>
+          </div>
+          <div>
+            <span>Customers tracked</span>
+            <strong>{data.customers.length}</strong>
+          </div>
+          <div>
+            <span>Net tracked</span>
+            <strong>${(totals.collected - totals.expenses).toFixed(2)}</strong>
+          </div>
+        </div>
+        <div className="inline-actions top-gap">
+          <button
+            className="button-secondary"
+            onClick={() =>
+              downloadCsv(
+                "customers.csv",
+                data.customers.map((customer) => ({
+                  name: customer.fullName,
+                  phone: customer.phone,
+                  email: customer.email,
+                  address: customer.address,
+                  preferred_contact: customer.preferredContact,
+                  created_at: customer.createdAt,
+                  lifecycle: customer.lifecycle
+                }))
+              )
+            }
+          >
+            Export Customers CSV
+          </button>
+          <button
+            className="button-secondary"
+            onClick={() =>
+              downloadCsv(
+                "invoices.csv",
+                data.invoices.map((invoice) => {
+                  const customer = data.customers.find((item) => item.id === invoice.customerId);
+                  return {
+                    invoice_id: invoice.id,
+                    customer: customer?.fullName ?? "",
+                    amount: invoice.amount,
+                    issue_date: invoice.issueDate,
+                    due_date: invoice.dueDate,
+                    status: invoice.status
+                  };
+                })
+              )
+            }
+          >
+            Export Invoices CSV
+          </button>
+          <button
+            className="button-secondary"
+            onClick={() =>
+              downloadCsv(
+                "payments.csv",
+                data.payments.map((payment) => {
+                  const customer = data.customers.find((item) => item.id === payment.customerId);
+                  return {
+                    payment_id: payment.id,
+                    customer: customer?.fullName ?? "",
+                    invoice_id: payment.invoiceId,
+                    amount: payment.amount,
+                    method: payment.method,
+                    paid_at: payment.paidAt,
+                    note: payment.note
+                  };
+                })
+              )
+            }
+          >
+            Export Payments CSV
+          </button>
+          <button
+            className="button-secondary"
+            onClick={() =>
+              downloadCsv(
+                "expenses.csv",
+                data.expenses.map((expense) => {
+                  const linkedJob = data.jobs.find((job) => job.id === expense.linkedJobId);
+                  return {
+                    expense_id: expense.id,
+                    date: expense.expenseDate,
+                    vendor: expense.vendor,
+                    category: expense.category,
+                    amount: expense.amount,
+                    linked_job: linkedJob?.title ?? "",
+                    note: expense.note,
+                    receipt_name: expense.receiptName ?? ""
+                  };
+                })
+              )
+            }
+          >
+            Export Expenses CSV
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+}
