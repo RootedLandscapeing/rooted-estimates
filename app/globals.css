@@ -21,6 +21,12 @@ html {
   font-size: 16px;
 }
 
+html,
+body {
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
 body {
   margin: 0;
   color: var(--ink);
@@ -175,6 +181,11 @@ button {
   font-weight: 700;
   cursor: pointer;
   box-shadow: 0 7px 16px rgba(125, 208, 16, 0.24);
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
 }
 
 .button-primary {
@@ -555,6 +566,18 @@ button {
   font-weight: 700;
 }
 
+button.text-link {
+  display: inline;
+  width: fit-content;
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  text-align: left;
+  text-decoration: underline;
+  text-underline-offset: 0.18rem;
+}
+
 .landing-footer {
   max-width: 1200px;
   margin: 1.75rem auto 0;
@@ -774,6 +797,7 @@ button {
 
 .summary-card-button {
   display: block;
+  width: 100%;
   border-radius: 18px;
   background: rgba(255, 250, 243, 0.78);
   color: var(--ink);
@@ -804,6 +828,7 @@ button {
 
 .action-tile {
   display: grid;
+  width: 100%;
   gap: 0.35rem;
   padding: 1rem;
   border-radius: 18px;
@@ -1014,7 +1039,7 @@ textarea {
 
 .line-item-grid {
   display: grid;
-  grid-template-columns: minmax(0, 2fr) 120px 140px;
+  grid-template-columns: minmax(0, 2fr) minmax(90px, 120px) minmax(110px, 140px);
   gap: 0.75rem;
 }
 
@@ -1133,6 +1158,14 @@ textarea {
     padding: 1rem;
   }
 
+  .hero-copy,
+  .hero-card,
+  .panel,
+  .about-panel,
+  .cta-panel {
+    border-radius: 20px;
+  }
+
   .hero {
     grid-template-columns: 1fr;
     min-height: auto;
@@ -1171,10 +1204,21 @@ textarea {
 
   .admin-sidebar {
     position: static;
+    overflow: hidden;
+    padding: 0.85rem;
   }
 
   .sidebar-nav {
-    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    display: flex;
+    overflow-x: auto;
+    padding-bottom: 0.2rem;
+    scroll-snap-type: x proximity;
+  }
+
+  .sidebar-nav-item {
+    min-width: 190px;
+    scroll-snap-align: start;
+    flex: 0 0 auto;
   }
 
   .summary-step {
@@ -1206,6 +1250,7 @@ textarea {
   .action-row {
     justify-items: start;
     justify-content: flex-start;
+    width: 100%;
     min-width: 0;
   }
 
@@ -1213,5 +1258,107 @@ textarea {
   .line-item-grid,
   .labor-input-grid {
     grid-template-columns: 1fr;
+  }
+
+  .quick-actions-grid,
+  .summary-grid,
+  .report-grid,
+  .availability-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .sticky-actions {
+    align-items: start;
+    flex-direction: column;
+  }
+
+  .task-filter-row {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .task-filter {
+    justify-content: space-between;
+  }
+}
+
+@media (max-width: 560px) {
+  html {
+    font-size: 15px;
+  }
+
+  main {
+    padding: 0.75rem;
+  }
+
+  .hero-copy,
+  .hero-card,
+  .panel,
+  .about-panel,
+  .cta-panel,
+  .admin-sidebar {
+    padding: 1rem;
+  }
+
+  .hero-copy h1,
+  .page-header h1 {
+    font-size: clamp(2rem, 12vw, 3rem);
+  }
+
+  .section-heading h2 {
+    font-size: 1.45rem;
+    max-width: 100%;
+  }
+
+  .brand-logo {
+    max-width: 260px;
+  }
+
+  .page-logo {
+    max-width: 190px;
+  }
+
+  .button-link,
+  button,
+  .button-inline,
+  .summary-step-cta {
+    width: 100%;
+    justify-content: center;
+    text-align: center;
+  }
+
+  button.text-link {
+    width: fit-content;
+    text-align: left;
+  }
+
+  .inline-actions,
+  .form-actions,
+  .action-row {
+    width: 100%;
+  }
+
+  .inline-actions > *,
+  .form-actions > *,
+  .action-row > * {
+    flex: 1 1 100%;
+  }
+
+  .sidebar-nav-item {
+    min-width: 78%;
+  }
+
+  .task-filter-row {
+    grid-template-columns: 1fr;
+  }
+
+  .featured-project-image,
+  .featured-image-placeholder {
+    min-height: 170px;
+  }
+
+  .editable-chip {
+    align-items: stretch;
+    flex-direction: column;
   }
 }
