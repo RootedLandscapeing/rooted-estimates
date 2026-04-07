@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   buildHourlyTimeOptions,
   formatAvailabilityRange,
@@ -10,6 +10,7 @@ import { printInvoicePdf, printQuotePdf } from "@/lib/documents";
 import { downloadCsv } from "@/lib/export";
 import { getInvoiceStatusLabel } from "@/lib/invoice-helpers";
 import { loadSupabaseAppData, saveSupabaseAppData } from "@/lib/supabase/app-data";
+import { createSignedReceiptUrl, uploadReceiptFile } from "@/lib/supabase/storage";
 import {
   approveQuote,
   completeJobAndCreateInvoice,
@@ -70,6 +71,7 @@ const taskPriorityLabels: Record<TaskPriority, string> = {
 };
 
 export function Dashboard() {
+  const expenseReceiptInputRef = useRef<HTMLInputElement | null>(null);
   const [data, setData] = useState<AppData | null>(null);
   const [activeSection, setActiveSection] = useState<AdminSection>("home");
   const [selectedEstimateId, setSelectedEstimateId] = useState("");
@@ -94,6 +96,7 @@ export function Dashboard() {
   const [expenseJobId, setExpenseJobId] = useState("");
   const [expenseReceiptName, setExpenseReceiptName] = useState("");
   const [expenseReceiptDataUrl, setExpenseReceiptDataUrl] = useState("");
+  const [expenseReceiptFile, setExpenseReceiptFile] = useState<File | null>(null);
   const [siteServiceInput, setSiteServiceInput] = useState("");
   const [projectTitleInput, setProjectTitleInput] = useState("");
   const [projectSummaryInput, setProjectSummaryInput] = useState("");
@@ -498,23 +501,32 @@ export function Dashboard() {
     if (!file) {
       setExpenseReceiptName("");
       setExpenseReceiptDataUrl("");
+      setExpenseReceiptFile(null);
       return;
     }
 
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result === "string") {
-        setExpenseReceiptName(file.name);
-        setExpenseReceiptDataUrl(reader.result);
-      }
-    };
-    reader.readAsDataURL(file);
+    setExpenseReceiptName(file.name);
+    setExpenseReceiptDataUrl("");
+    setExpenseReceiptFile(file);
   }
 
-  function handleRecordExpense(event: React.FormEvent<HTMLFormElement>) {
+  async function handleRecordExpense(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!data || !expenseVendor || !expenseAmount) {
       return;
+    }
+
+    let receiptName = expenseReceiptName || undefined;
+    let receiptDataUrl = expenseReceiptDataUrl || undefined;
+
+    if (expenseReceiptFile) {
+      try {
+        const uploadedReceipt = await uploadReceiptFile(expenseReceiptFile);
+        receiptName = uploadedReceipt.fileName;
+        receiptDataUrl = uploadedReceipt.filePath;
+      } catch (error) {
+        console.error(error);
+      }
     }
 
     const nextData = recordExpense(data, {
@@ -524,8 +536,8 @@ export function Dashboard() {
       amount: Number(expenseAmount),
       note: expenseNote,
       linkedJobId: expenseJobId || undefined,
-      receiptName: expenseReceiptName || undefined,
-      receiptDataUrl: expenseReceiptDataUrl || undefined
+      receiptName,
+      receiptDataUrl
     });
 
     persist(nextData);
@@ -537,6 +549,28 @@ export function Dashboard() {
     setExpenseJobId("");
     setExpenseReceiptName("");
     setExpenseReceiptDataUrl("");
+    setExpenseReceiptFile(null);
+    if (expenseReceiptInputRef.current) {
+      expenseReceiptInputRef.current.value = "";
+    }
+  }
+
+  async function openReceipt(receiptReference: string) {
+    if (!receiptReference) {
+      return;
+    }
+
+    if (receiptReference.startsWith("data:") || receiptReference.startsWith("http")) {
+      window.open(receiptReference, "_blank", "noopener,noreferrer");
+      return;
+    }
+
+    try {
+      const signedUrl = await createSignedReceiptUrl(receiptReference);
+      window.open(signedUrl, "_blank", "noopener,noreferrer");
+    } catch (error) {
+      console.error(error);
+    }
   }
 
   function updateSiteContentField<
@@ -1813,14 +1847,13 @@ export function Dashboard() {
                   </small>
                   {expense.receiptDataUrl ? (
                     <div className="receipt-links">
-                      <a
-                        href={expense.receiptDataUrl}
-                        target="_blank"
-                        rel="noreferrer"
+                      <button
+                        type="button"
                         className="text-link"
+                        onClick={() => openReceipt(expense.receiptDataUrl ?? "")}
                       >
                         View receipt{expense.receiptName ? `: ${expense.receiptName}` : ""}
-                      </a>
+                      </button>
                     </div>
                   ) : null}
                 </div>
@@ -1828,14 +1861,13 @@ export function Dashboard() {
                   <span className="pill">${expense.amount.toFixed(2)}</span>
                   {expense.receiptDataUrl ? (
                     <div className="action-row">
-                      <a
-                        href={expense.receiptDataUrl}
-                        target="_blank"
-                        rel="noreferrer"
+                      <button
+                        type="button"
                         className="button-inline"
+                        onClick={() => openReceipt(expense.receiptDataUrl ?? "")}
                       >
                         Receipt
-                      </a>
+                      </button>
                     </div>
                   ) : null}
                 </div>
@@ -1911,7 +1943,12 @@ export function Dashboard() {
           </label>
           <label className="full-width">
             Receipt attachment
-            <input type="file" accept="image/*,.pdf" onChange={handleReceiptUpload} />
+            <input
+              ref={expenseReceiptInputRef}
+              type="file"
+              accept="image/*,.pdf"
+              onChange={handleReceiptUpload}
+            />
           </label>
           {expenseReceiptName ? (
             <div className="full-width upload-note">Attached receipt: {expenseReceiptName}</div>
