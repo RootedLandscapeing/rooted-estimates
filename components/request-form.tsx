@@ -120,6 +120,16 @@ export function RequestForm() {
 
     try {
       await createSupabaseEstimateRequest(form);
+      // The request is saved first; notification failures should not block the customer.
+      fetch("/api/estimate-notification", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(form)
+      }).catch((error) => {
+        console.error(error);
+      });
       setSubmitted(true);
       setForm((current) => ({
         ...initialState,
