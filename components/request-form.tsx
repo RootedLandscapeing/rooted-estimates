@@ -6,6 +6,7 @@ import {
   buildHourlyTimeOptions,
   getFirstAvailableDay
 } from "@/lib/availability";
+import { createSupabaseEstimateRequest } from "@/lib/supabase/estimate-requests";
 import { createEstimateLead, loadAppData, saveAppData } from "@/lib/storage";
 import { AvailabilitySlot } from "@/lib/types";
 
@@ -24,6 +25,7 @@ const initialState = {
 export function RequestForm() {
   const [form, setForm] = useState(initialState);
   const [submitted, setSubmitted] = useState(false);
+  const [submitError, setSubmitError] = useState("");
   const [availability, setAvailability] = useState<AvailabilitySlot[]>([]);
   const [selectedDay, setSelectedDay] = useState("");
   const [selectedTime, setSelectedTime] = useState("");
@@ -108,20 +110,35 @@ export function RequestForm() {
     }
   }
 
-  function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!form.preferredSlot) {
       return;
     }
 
-    const currentData = loadAppData();
-    const nextData = createEstimateLead(currentData, form);
-    saveAppData(nextData);
-    setSubmitted(true);
-    setForm((current) => ({
-      ...initialState,
-      preferredSlot: current.preferredSlot
-    }));
+    setSubmitError("");
+
+    try {
+      await createSupabaseEstimateRequest(form);
+      setSubmitted(true);
+      setForm((current) => ({
+        ...initialState,
+        preferredSlot: current.preferredSlot
+      }));
+    } catch (error) {
+      console.error(error);
+      const currentData = loadAppData();
+      const nextData = createEstimateLead(currentData, form);
+      saveAppData(nextData);
+      setSubmitted(true);
+      setSubmitError(
+        "Your request was saved on this device, but the live dashboard sync needs to be checked."
+      );
+      setForm((current) => ({
+        ...initialState,
+        preferredSlot: current.preferredSlot
+      }));
+    }
   }
 
   return (
@@ -137,6 +154,8 @@ export function RequestForm() {
           follow up to confirm the exact estimate date.
         </div>
       ) : null}
+
+      {submitError ? <div className="notice">{submitError}</div> : null}
 
       {!availableDays.length ? (
         <div className="notice">

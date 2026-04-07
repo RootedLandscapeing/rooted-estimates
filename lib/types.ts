@@ -29,6 +29,8 @@ export type ExpenseCategory =
   | "insurance"
   | "software"
   | "other";
+export type TaskStatus = "to_do" | "in_progress" | "waiting_on_customer" | "completed";
+export type TaskPriority = "high" | "normal" | "low";
 
 export type EstimateRequest = {
   id: string;
@@ -182,6 +184,21 @@ export type AppNotification = {
   read: boolean;
 };
 
+export type Task = {
+  id: string;
+  title: string;
+  description: string;
+  dueDate: string;
+  status: TaskStatus;
+  priority: TaskPriority;
+  relatedLeadId?: string;
+  relatedCustomerId?: string;
+  relatedJobId?: string;
+  relatedQuoteId?: string;
+  relatedInvoiceId?: string;
+  createdAt: string;
+};
+
 export type FeaturedProject = {
   id: string;
   title: string;
@@ -209,6 +226,7 @@ export type AppData = {
   customers: Customer[];
   estimateRequests: EstimateRequest[];
   notifications: AppNotification[];
+  tasks: Task[];
   quotes: Quote[];
   jobs: Job[];
   invoices: Invoice[];

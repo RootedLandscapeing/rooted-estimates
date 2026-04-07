@@ -687,9 +687,109 @@ button {
   border-color: rgba(125, 208, 16, 0.28);
 }
 
+.admin-layout {
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr);
+  gap: 1.25rem;
+  align-items: start;
+}
+
+.admin-sidebar {
+  position: sticky;
+  top: 1rem;
+  display: grid;
+  gap: 1rem;
+  border: 1px solid rgba(16, 17, 15, 0.12);
+  border-radius: 24px;
+  background: rgba(255, 250, 243, 0.82);
+  padding: 1rem;
+  box-shadow: 0 18px 40px rgba(16, 17, 15, 0.1);
+}
+
+.sidebar-nav {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.sidebar-nav-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  width: 100%;
+  border-radius: 16px;
+  background: rgba(16, 17, 15, 0.06);
+  color: var(--ink);
+  padding: 0.85rem 0.95rem;
+  box-shadow: none;
+  text-align: left;
+  font-family: "Trebuchet MS", Helvetica, sans-serif;
+}
+
+.sidebar-nav-item strong {
+  display: inline-flex;
+  min-width: 1.85rem;
+  height: 1.85rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: rgba(16, 17, 15, 0.86);
+  color: #f6f0e6;
+  font-size: 0.82rem;
+}
+
+.sidebar-nav-item.active {
+  background: linear-gradient(180deg, rgba(183, 255, 72, 0.95), rgba(141, 234, 16, 0.88));
+  color: #161714;
+}
+
+.sidebar-nav-item.active strong {
+  background: rgba(16, 17, 15, 0.92);
+}
+
 .dashboard-grid {
   display: grid;
   gap: 1.25rem;
+}
+
+.admin-content .dashboard-section {
+  display: none;
+}
+
+.admin-content[data-active-section="home"] .dashboard-section[data-admin-section="home"],
+.admin-content[data-active-section="leads"] .dashboard-section[data-admin-section="leads"],
+.admin-content[data-active-section="jobs"] .dashboard-section[data-admin-section="jobs"],
+.admin-content[data-active-section="tasks"] .dashboard-section[data-admin-section="tasks"],
+.admin-content[data-active-section="customers"] .dashboard-section[data-admin-section="customers"],
+.admin-content[data-active-section="invoices"] .dashboard-section[data-admin-section="invoices"],
+.admin-content[data-active-section="landing"] .dashboard-section[data-admin-section="landing"],
+.admin-content[data-active-section="availability"] .dashboard-section[data-admin-section="availability"],
+.admin-content[data-active-section="settings"] .dashboard-section[data-admin-section="settings"] {
+  display: block;
+}
+
+.admin-content[data-active-section="home"] .summary-grid.dashboard-section {
+  display: grid;
+}
+
+.summary-card-button {
+  display: block;
+  border-radius: 18px;
+  background: rgba(255, 250, 243, 0.78);
+  color: var(--ink);
+  text-align: left;
+  box-shadow: none;
+}
+
+.summary-card-button:hover,
+.summary-card-button:focus-visible {
+  border-color: rgba(125, 208, 16, 0.45);
+  box-shadow: 0 12px 24px rgba(16, 17, 15, 0.1);
+}
+
+.summary-card.attention {
+  border-color: rgba(166, 40, 31, 0.28);
+  background: rgba(255, 244, 238, 0.9);
 }
 
 .quick-actions-panel {
@@ -752,6 +852,98 @@ button {
   gap: 0.6rem;
   flex-wrap: wrap;
   justify-content: flex-end;
+}
+
+.task-filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+}
+
+.task-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  border-radius: 999px;
+  background: rgba(16, 17, 15, 0.08);
+  color: var(--ink);
+  padding: 0.72rem 0.95rem;
+  box-shadow: none;
+  font-family: "Trebuchet MS", Helvetica, sans-serif;
+}
+
+.task-filter span {
+  display: inline-flex;
+  min-width: 1.55rem;
+  height: 1.55rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: rgba(16, 17, 15, 0.84);
+  color: #f6f0e6;
+  font-size: 0.78rem;
+}
+
+.task-filter.active {
+  background: rgba(167, 255, 47, 0.28);
+  color: #1d3000;
+}
+
+.task-card {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: center;
+  border: 1px solid rgba(16, 17, 15, 0.12);
+  border-radius: 18px;
+  background: rgba(255, 250, 243, 0.78);
+  padding: 1rem;
+}
+
+.task-card.overdue {
+  border-color: rgba(166, 40, 31, 0.3);
+  background: rgba(255, 244, 238, 0.94);
+}
+
+.task-title-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+}
+
+.task-title-row h3 {
+  margin: 0;
+}
+
+.task-card p {
+  margin: 0.35rem 0 0;
+  color: var(--muted);
+}
+
+.priority-pill {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 0.34rem 0.62rem;
+  font-family: "Trebuchet MS", Helvetica, sans-serif;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.priority-pill.high {
+  background: rgba(166, 40, 31, 0.14);
+  color: #8f2119;
+}
+
+.priority-pill.normal {
+  background: rgba(167, 255, 47, 0.2);
+  color: #2d4708;
+}
+
+.priority-pill.low {
+  background: rgba(16, 17, 15, 0.08);
+  color: var(--muted);
 }
 
 .list-card,
@@ -824,6 +1016,47 @@ textarea {
   display: grid;
   grid-template-columns: minmax(0, 2fr) 120px 140px;
   gap: 0.75rem;
+}
+
+.compact-heading {
+  margin-bottom: 0.75rem;
+}
+
+.compact-heading h2 {
+  font-size: 1.25rem;
+}
+
+.labor-calculator {
+  border: 1px solid rgba(16, 17, 15, 0.12);
+  border-radius: 18px;
+  background: rgba(255, 250, 243, 0.78);
+  padding: 1rem;
+}
+
+.labor-input-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) minmax(150px, 0.75fr);
+  gap: 0.85rem;
+  align-items: end;
+}
+
+.labor-total-card {
+  display: grid;
+  gap: 0.2rem;
+  border-radius: 16px;
+  background: rgba(16, 17, 15, 0.9);
+  color: #f6f0e6;
+  padding: 0.85rem 0.95rem;
+}
+
+.labor-total-card span {
+  font-family: "Trebuchet MS", Helvetica, sans-serif;
+  font-size: 0.82rem;
+  color: rgba(246, 240, 230, 0.72);
+}
+
+.labor-total-card strong {
+  font-size: 1.25rem;
 }
 
 .notice {
@@ -932,6 +1165,18 @@ textarea {
     grid-template-columns: 1fr;
   }
 
+  .admin-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-sidebar {
+    position: static;
+  }
+
+  .sidebar-nav {
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  }
+
   .summary-step {
     grid-template-columns: 1fr;
   }
@@ -951,7 +1196,8 @@ textarea {
 
   .page-header,
   .list-card,
-  .split-card {
+  .split-card,
+  .task-card {
     flex-direction: column;
     align-items: start;
   }
@@ -964,7 +1210,8 @@ textarea {
   }
 
   .form-grid,
-  .line-item-grid {
+  .line-item-grid,
+  .labor-input-grid {
     grid-template-columns: 1fr;
   }
 }

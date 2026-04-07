@@ -32,6 +32,7 @@ export const defaultData: AppData = {
     }
   ],
   notifications: [],
+  tasks: [],
   quotes: [
     {
       id: "quote-1",

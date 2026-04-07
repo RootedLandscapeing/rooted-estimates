@@ -9,9 +9,11 @@ import {
 import { printInvoicePdf, printQuotePdf } from "@/lib/documents";
 import { downloadCsv } from "@/lib/export";
 import { getInvoiceStatusLabel } from "@/lib/invoice-helpers";
+import { loadSupabaseEstimateWorkflow } from "@/lib/supabase/estimate-requests";
 import {
   approveQuote,
   completeJobAndCreateInvoice,
+  createTask,
   createQuote,
   declineQuote,
   loadAppData,
@@ -19,14 +21,18 @@ import {
   recordExpense,
   recordPayment,
   saveAppData,
-  sendQuote
+  sendQuote,
+  updateTask
 } from "@/lib/storage";
 import {
   AppData,
   AvailabilitySlot,
   ExpenseCategory,
   PaymentMethod,
-  QuoteLineItem
+  QuoteLineItem,
+  Task,
+  TaskPriority,
+  TaskStatus
 } from "@/lib/types";
 
 const starterLine: QuoteLineItem = {
@@ -37,11 +43,40 @@ const starterLine: QuoteLineItem = {
   amount: 0
 };
 
+const LABOR_RATE_PER_PERSON_HOUR = 75;
+
+type AdminSection =
+  | "home"
+  | "leads"
+  | "jobs"
+  | "tasks"
+  | "customers"
+  | "invoices"
+  | "landing"
+  | "availability"
+  | "settings";
+
+const taskStatusLabels: Record<TaskStatus, string> = {
+  to_do: "To Do",
+  in_progress: "In Progress",
+  waiting_on_customer: "Waiting on Customer",
+  completed: "Completed"
+};
+
+const taskPriorityLabels: Record<TaskPriority, string> = {
+  high: "High",
+  normal: "Normal",
+  low: "Low"
+};
+
 export function Dashboard() {
   const [data, setData] = useState<AppData | null>(null);
+  const [activeSection, setActiveSection] = useState<AdminSection>("home");
   const [selectedEstimateId, setSelectedEstimateId] = useState("");
   const [quoteTitle, setQuoteTitle] = useState("");
   const [quoteLines, setQuoteLines] = useState<QuoteLineItem[]>([starterLine]);
+  const [laborPeople, setLaborPeople] = useState("");
+  const [laborHours, setLaborHours] = useState("");
   const [depositMode, setDepositMode] = useState<"none" | "amount" | "percent">("none");
   const [depositAmount, setDepositAmount] = useState("");
   const [depositPercent, setDepositPercent] = useState("");
@@ -64,13 +99,39 @@ export function Dashboard() {
   const [projectSummaryInput, setProjectSummaryInput] = useState("");
   const [projectImageDataUrl, setProjectImageDataUrl] = useState("");
   const [projectImageName, setProjectImageName] = useState("");
-  const [showSiteEditor, setShowSiteEditor] = useState(false);
-  const [showAvailabilityEditor, setShowAvailabilityEditor] = useState(false);
   const [browserAlertsEnabled, setBrowserAlertsEnabled] = useState(false);
   const [showPaidInvoices, setShowPaidInvoices] = useState(false);
+  const [taskView, setTaskView] = useState<"today" | "week" | "overdue" | "all">("week");
+  const [taskTitle, setTaskTitle] = useState("");
+  const [taskDescription, setTaskDescription] = useState("");
+  const [taskDueDate, setTaskDueDate] = useState(new Date().toISOString().slice(0, 10));
+  const [taskStatus, setTaskStatus] = useState<TaskStatus>("to_do");
+  const [taskPriority, setTaskPriority] = useState<TaskPriority>("normal");
+  const [taskRelatedCustomerId, setTaskRelatedCustomerId] = useState("");
+  const [taskRelatedJobId, setTaskRelatedJobId] = useState("");
 
   useEffect(() => {
-    setData(loadAppData());
+    const localData = loadAppData();
+    setData(localData);
+
+    loadSupabaseEstimateWorkflow()
+      .then((workflowData) => {
+        if (!workflowData) {
+          return;
+        }
+
+        const nextData = {
+          ...localData,
+          customers: workflowData.customers,
+          estimateRequests: workflowData.estimateRequests,
+          tasks: workflowData.tasks
+        };
+        setData(nextData);
+        saveAppData(nextData);
+      })
+      .catch((error) => {
+        console.error(error);
+      });
   }, []);
 
   useEffect(() => {
@@ -163,6 +224,23 @@ export function Dashboard() {
     [data]
   );
 
+  const taskBuckets = useMemo(() => {
+    const today = new Date().toISOString().slice(0, 10);
+    const weekEndDate = new Date();
+    weekEndDate.setDate(weekEndDate.getDate() + 7);
+    const weekEnd = weekEndDate.toISOString().slice(0, 10);
+    const openTasks = data?.tasks.filter((task) => task.status !== "completed") ?? [];
+
+    return {
+      today: openTasks.filter((task) => task.dueDate === today),
+      week: openTasks.filter((task) => task.dueDate >= today && task.dueDate <= weekEnd),
+      overdue: openTasks.filter((task) => task.dueDate < today),
+      all: data?.tasks ?? []
+    };
+  }, [data]);
+
+  const visibleTasks = taskBuckets[taskView];
+
   useEffect(() => {
     if (!browserAlertsEnabled || typeof window === "undefined" || typeof Notification === "undefined") {
       return;
@@ -205,6 +283,62 @@ export function Dashboard() {
     }
 
     persist(markNotificationsRead(data, unreadNotifications.map((notification) => notification.id)));
+  }
+
+  function isTaskOverdue(task: Task) {
+    return task.status !== "completed" && task.dueDate < new Date().toISOString().slice(0, 10);
+  }
+
+  function handleCreateTask(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!data || !taskTitle.trim()) {
+      return;
+    }
+
+    persist(
+      createTask(data, {
+        title: taskTitle.trim(),
+        description: taskDescription.trim(),
+        dueDate: taskDueDate,
+        status: taskStatus,
+        priority: taskPriority,
+        relatedCustomerId: taskRelatedCustomerId || undefined,
+        relatedJobId: taskRelatedJobId || undefined
+      })
+    );
+    setTaskTitle("");
+    setTaskDescription("");
+    setTaskDueDate(new Date().toISOString().slice(0, 10));
+    setTaskStatus("to_do");
+    setTaskPriority("normal");
+    setTaskRelatedCustomerId("");
+    setTaskRelatedJobId("");
+  }
+
+  function updateTaskStatus(taskId: string, status: TaskStatus) {
+    if (!data) {
+      return;
+    }
+
+    persist(updateTask(data, taskId, { status }));
+  }
+
+  function getTaskRelationText(task: Task) {
+    if (!data) {
+      return "";
+    }
+
+    const customer = data.customers.find((item) => item.id === task.relatedCustomerId);
+    const job = data.jobs.find((item) => item.id === task.relatedJobId);
+    const estimate = data.estimateRequests.find((item) => item.id === task.relatedLeadId);
+    const invoice = data.invoices.find((item) => item.id === task.relatedInvoiceId);
+
+    return [
+      customer ? `Customer: ${customer.fullName}` : "",
+      job ? `Job: ${job.title}` : "",
+      estimate ? `Lead: ${estimate.jobType}` : "",
+      invoice ? `Invoice: ${invoice.id}` : ""
+    ].filter(Boolean).join(" • ");
   }
 
   function updateLine(index: number, field: keyof QuoteLineItem, value: string) {
@@ -255,7 +389,23 @@ export function Dashboard() {
       return;
     }
 
-    const lineItems = quoteLines.filter((line) => line.description.trim().length > 0);
+    const laborPersonCount = Number(laborPeople || 0);
+    const laborHourCount = Number(laborHours || 0);
+    const laborAmount = laborPersonCount * laborHourCount * LABOR_RATE_PER_PERSON_HOUR;
+    const laborLine =
+      laborAmount > 0
+        ? {
+            id: `line-labor-${Date.now()}`,
+            description: `Labor (${laborPersonCount} ${laborPersonCount === 1 ? "person" : "people"} x ${laborHourCount} ${laborHourCount === 1 ? "hour" : "hours"} @ $${LABOR_RATE_PER_PERSON_HOUR}/hr)`,
+            qty: laborPersonCount * laborHourCount,
+            unitPrice: LABOR_RATE_PER_PERSON_HOUR,
+            amount: laborAmount
+          }
+        : null;
+    const lineItems = [
+      ...(laborLine ? [laborLine] : []),
+      ...quoteLines.filter((line) => line.description.trim().length > 0)
+    ];
     if (!lineItems.length) {
       return;
     }
@@ -301,6 +451,8 @@ export function Dashboard() {
     setQuoteTitle("");
     setSelectedEstimateId("");
     setQuoteLines([starterLine]);
+    setLaborPeople("");
+    setLaborHours("");
     setDepositMode("none");
     setDepositAmount("");
     setDepositPercent("");
@@ -489,9 +641,39 @@ export function Dashboard() {
     persist(nextData);
   }
 
+  const navItems: Array<{ id: AdminSection; label: string; count?: number }> = [
+    { id: "home", label: "Dashboard" },
+    { id: "leads", label: "Leads / Estimates", count: estimateOptions.length },
+    { id: "jobs", label: "Jobs / Projects", count: data.jobs.length },
+    { id: "tasks", label: "Tasks / Reminders", count: taskBuckets.overdue.length + taskBuckets.today.length },
+    { id: "customers", label: "Customers", count: activeCustomers.length },
+    { id: "invoices", label: "Invoices / Payments", count: activeInvoices.length },
+    { id: "landing", label: "Edit Landing Page" },
+    { id: "availability", label: "Estimate Availability" },
+    { id: "settings", label: "Settings / Records" }
+  ];
+
   return (
-    <div className="dashboard-grid">
-      <section className="panel quick-actions-panel">
+    <div className="admin-layout">
+      <aside className="admin-sidebar">
+        <p className="eyebrow">Admin Menu</p>
+        <nav className="sidebar-nav" aria-label="Dashboard sections">
+          {navItems.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              className={activeSection === item.id ? "sidebar-nav-item active" : "sidebar-nav-item"}
+              onClick={() => setActiveSection(item.id)}
+            >
+              <span>{item.label}</span>
+              {typeof item.count === "number" ? <strong>{item.count}</strong> : null}
+            </button>
+          ))}
+        </nav>
+      </aside>
+
+      <div className="dashboard-grid admin-content" data-active-section={activeSection}>
+      <section className="panel quick-actions-panel dashboard-section" data-admin-section="home">
         <div className="section-heading">
           <p className="eyebrow">Quick Actions</p>
           <h2>Jump straight to the next business task.</h2>
@@ -500,47 +682,39 @@ export function Dashboard() {
           <button
             type="button"
             className="action-tile action-tile-button"
-            onClick={() => setShowAvailabilityEditor((current) => !current)}
+            onClick={() => setActiveSection("leads")}
           >
-            <strong>Edit Estimate Availability</strong>
-            <span>
-              {showAvailabilityEditor
-                ? "Hide weekly estimate scheduling."
-                : "Choose available days and set the estimate hours customers can book."}
-            </span>
+            <strong>Create Quote</strong>
+            <span>Price a lead and send the agreement.</span>
           </button>
           <button
             type="button"
             className="action-tile action-tile-button"
-            onClick={() => setShowSiteEditor((current) => !current)}
+            onClick={() => setActiveSection("leads")}
           >
-            <strong>Edit Landing Page</strong>
-            <span>
-              {showSiteEditor
-                ? "Hide website editor."
-                : "Update services, business description, and featured jobs."}
-            </span>
-          </button>
-          <a href="#quote-calculator" className="action-tile">
-            <strong>Create Quote</strong>
-            <span>Price a lead and send the agreement.</span>
-          </a>
-          <a href="#quotes" className="action-tile">
             <strong>Review Quotes</strong>
             <span>Approve, deny, or print the customer copy.</span>
-          </a>
-          <a href="#invoices" className="action-tile">
+          </button>
+          <button
+            type="button"
+            className="action-tile action-tile-button"
+            onClick={() => setActiveSection("invoices")}
+          >
             <strong>Record Payment</strong>
             <span>Update invoices and move jobs into history.</span>
-          </a>
-          <a href="#expenses" className="action-tile">
+          </button>
+          <button
+            type="button"
+            className="action-tile action-tile-button"
+            onClick={() => setActiveSection("settings")}
+          >
             <strong>Log Expense</strong>
             <span>Track receipts and tax-season costs quickly.</span>
-          </a>
+          </button>
         </div>
       </section>
 
-      <section className="panel">
+      <section className="panel dashboard-section" data-admin-section="home">
         <div className="section-heading">
           <p className="eyebrow">Notifications</p>
           <h2>See new estimate requests as they come in.</h2>
@@ -589,8 +763,7 @@ export function Dashboard() {
         </div>
       </section>
 
-      {showSiteEditor ? (
-        <section className="panel" id="site-content">
+        <section className="panel dashboard-section" data-admin-section="landing" id="site-content">
         <div className="section-heading">
           <p className="eyebrow">Website Content</p>
           <h2>Update the public landing page as the business grows.</h2>
@@ -757,10 +930,8 @@ export function Dashboard() {
           </div>
         </div>
       </section>
-      ) : null}
 
-      {showAvailabilityEditor ? (
-        <section className="panel" id="availability-settings">
+        <section className="panel dashboard-section" data-admin-section="availability" id="availability-settings">
           <div className="section-heading">
             <p className="eyebrow">Estimate Availability</p>
             <h2>Set the days and hours customers can request estimates.</h2>
@@ -847,36 +1018,197 @@ export function Dashboard() {
             })}
           </div>
         </section>
-      ) : null}
 
-      <section className="panel summary-grid">
-        <div className="summary-card">
-          <span>Total leads</span>
+      <section className="panel summary-grid dashboard-section" data-admin-section="home">
+        <button type="button" className="summary-card summary-card-button" onClick={() => setActiveSection("leads")}>
+          <span>New estimate requests</span>
           <strong>{totals.totalLeads}</strong>
-        </div>
-        <div className="summary-card">
+        </button>
+        <button type="button" className="summary-card summary-card-button" onClick={() => setActiveSection("leads")}>
           <span>Quotes sent</span>
           <strong>{totals.activeQuotes}</strong>
-        </div>
-        <div className="summary-card">
-          <span>Completed jobs</span>
-          <strong>{totals.completedJobs}</strong>
-        </div>
-        <div className="summary-card">
+        </button>
+        <button type="button" className="summary-card summary-card-button" onClick={() => setActiveSection("jobs")}>
+          <span>Active jobs</span>
+          <strong>{data.jobs.filter((job) => job.status !== "completed").length}</strong>
+        </button>
+        <button type="button" className="summary-card summary-card-button" onClick={() => setActiveSection("invoices")}>
           <span>Unpaid invoices</span>
           <strong>{totals.unpaidInvoices}</strong>
-        </div>
-        <div className="summary-card accent">
-          <span>Payments recorded</span>
-          <strong>${totals.collected.toFixed(2)}</strong>
-        </div>
-        <div className="summary-card">
-          <span>Expenses tracked</span>
-          <strong>${totals.expenses.toFixed(2)}</strong>
-        </div>
+        </button>
+        <button type="button" className="summary-card summary-card-button attention" onClick={() => setActiveSection("tasks")}>
+          <span>Overdue tasks</span>
+          <strong>{taskBuckets.overdue.length}</strong>
+        </button>
+        <button type="button" className="summary-card summary-card-button accent" onClick={() => setActiveSection("tasks")}>
+          <span>Tasks due this week</span>
+          <strong>{taskBuckets.week.length}</strong>
+        </button>
       </section>
 
-      <section className="panel">
+      <section className="panel dashboard-section" data-admin-section="tasks">
+        <div className="section-heading">
+          <p className="eyebrow">Tasks and Reminders</p>
+          <h2>Keep follow-ups, estimate reminders, and payment checks in one place.</h2>
+        </div>
+
+        <div className="task-filter-row" aria-label="Task views">
+          {[
+            { id: "today", label: "Today", count: taskBuckets.today.length },
+            { id: "week", label: "This Week", count: taskBuckets.week.length },
+            { id: "overdue", label: "Overdue", count: taskBuckets.overdue.length },
+            { id: "all", label: "All Tasks", count: taskBuckets.all.length }
+          ].map((view) => (
+            <button
+              key={view.id}
+              type="button"
+              className={taskView === view.id ? "task-filter active" : "task-filter"}
+              onClick={() => setTaskView(view.id as typeof taskView)}
+            >
+              {view.label}
+              <span>{view.count}</span>
+            </button>
+          ))}
+        </div>
+
+        <div className="stack top-gap">
+          {visibleTasks.map((task) => {
+            const relationText = getTaskRelationText(task);
+
+            return (
+              <article
+                key={task.id}
+                className={isTaskOverdue(task) ? "task-card overdue" : "task-card"}
+              >
+                <div className="card-copy">
+                  <div className="task-title-row">
+                    <h3>{task.title}</h3>
+                    <span className={`priority-pill ${task.priority}`}>
+                      {taskPriorityLabels[task.priority]}
+                    </span>
+                  </div>
+                  <p>{task.description || "No notes added."}</p>
+                  <div className="timestamp-list">
+                    <span>Due {task.dueDate}</span>
+                    <span>Created {task.createdAt}</span>
+                    {relationText ? <span>{relationText}</span> : null}
+                  </div>
+                </div>
+                <div className="action-stack">
+                  <span className={`pill ${task.status === "completed" ? "accent-pill" : ""}`}>
+                    {taskStatusLabels[task.status]}
+                  </span>
+                  <select
+                    value={task.status}
+                    onChange={(event) => updateTaskStatus(task.id, event.target.value as TaskStatus)}
+                    aria-label={`Update ${task.title} status`}
+                  >
+                    {Object.entries(taskStatusLabels).map(([status, label]) => (
+                      <option key={status} value={status}>
+                        {label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </article>
+            );
+          })}
+          {!visibleTasks.length ? (
+            <p className="empty-state">No tasks in this view yet.</p>
+          ) : null}
+        </div>
+
+        <form className="form-grid top-gap" onSubmit={handleCreateTask}>
+          <label className="full-width">
+            Task title
+            <input
+              value={taskTitle}
+              onChange={(event) => setTaskTitle(event.target.value)}
+              placeholder="Follow up on estimate, check payment, schedule materials..."
+              required
+            />
+          </label>
+          <label className="full-width">
+            Notes
+            <textarea
+              rows={3}
+              value={taskDescription}
+              onChange={(event) => setTaskDescription(event.target.value)}
+              placeholder="Add the reminder details."
+            />
+          </label>
+          <label>
+            Due date
+            <input
+              type="date"
+              value={taskDueDate}
+              onChange={(event) => setTaskDueDate(event.target.value)}
+              required
+            />
+          </label>
+          <label>
+            Status
+            <select
+              value={taskStatus}
+              onChange={(event) => setTaskStatus(event.target.value as TaskStatus)}
+            >
+              {Object.entries(taskStatusLabels).map(([status, label]) => (
+                <option key={status} value={status}>
+                  {label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Priority
+            <select
+              value={taskPriority}
+              onChange={(event) => setTaskPriority(event.target.value as TaskPriority)}
+            >
+              {Object.entries(taskPriorityLabels).map(([priority, label]) => (
+                <option key={priority} value={priority}>
+                  {label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Related customer
+            <select
+              value={taskRelatedCustomerId}
+              onChange={(event) => setTaskRelatedCustomerId(event.target.value)}
+            >
+              <option value="">No customer linked</option>
+              {data.customers.map((customer) => (
+                <option key={customer.id} value={customer.id}>
+                  {customer.fullName}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="full-width">
+            Related job
+            <select
+              value={taskRelatedJobId}
+              onChange={(event) => setTaskRelatedJobId(event.target.value)}
+            >
+              <option value="">No job linked</option>
+              {data.jobs.map((job) => (
+                <option key={job.id} value={job.id}>
+                  {job.title}
+                </option>
+              ))}
+            </select>
+          </label>
+          <div className="full-width form-actions">
+            <button type="submit" className="button-primary">
+              Add Task
+            </button>
+          </div>
+        </form>
+      </section>
+
+      <section className="panel dashboard-section" data-admin-section="leads">
         <div className="section-heading">
           <p className="eyebrow">Leads</p>
           <h2>People waiting on an estimate or quote decision.</h2>
@@ -898,7 +1230,7 @@ export function Dashboard() {
         </div>
       </section>
 
-      <section className="panel">
+      <section className="panel dashboard-section" data-admin-section="customers">
         <div className="section-heading">
           <p className="eyebrow">Active Customers</p>
           <h2>Approved quotes become active customers while work and payment are in progress.</h2>
@@ -922,7 +1254,7 @@ export function Dashboard() {
         </div>
       </section>
 
-      <section className="panel">
+      <section className="panel dashboard-section" data-admin-section="customers">
         <div className="section-heading">
           <p className="eyebrow">Past Customers</p>
           <h2>Once payment is fully collected, the customer record moves here for history.</h2>
@@ -946,7 +1278,7 @@ export function Dashboard() {
         </div>
       </section>
 
-      <section className="panel">
+      <section className="panel dashboard-section" data-admin-section="leads">
         <div className="section-heading">
           <p className="eyebrow">Estimate Queue</p>
           <h2>New leads and scheduled estimate requests</h2>
@@ -975,7 +1307,7 @@ export function Dashboard() {
         </div>
       </section>
 
-      <section className="panel" id="quote-calculator">
+      <section className="panel dashboard-section" data-admin-section="leads" id="quote-calculator">
         <div className="section-heading">
           <p className="eyebrow">Quote Calculator</p>
           <h2>Start with a lead, price the work, and turn it into a job later.</h2>
@@ -1014,6 +1346,45 @@ export function Dashboard() {
               readOnly
             />
           </label>
+          <div className="full-width labor-calculator">
+            <div className="section-heading compact-heading">
+              <p className="eyebrow">Labor Calculator</p>
+              <h2>$75 per hour per person</h2>
+            </div>
+            <div className="labor-input-grid">
+              <label>
+                Number of people
+                <input
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={laborPeople}
+                  onChange={(event) => setLaborPeople(event.target.value)}
+                  placeholder="2"
+                />
+              </label>
+              <label>
+                Hours on job
+                <input
+                  type="number"
+                  min="0"
+                  step="0.25"
+                  value={laborHours}
+                  onChange={(event) => setLaborHours(event.target.value)}
+                  placeholder="1"
+                />
+              </label>
+              <div className="labor-total-card">
+                <span>Labor total</span>
+                <strong>
+                  ${(Number(laborPeople || 0) * Number(laborHours || 0) * LABOR_RATE_PER_PERSON_HOUR).toFixed(2)}
+                </strong>
+              </div>
+            </div>
+            <p className="status-note">
+              Labor is automatically added as a quote line when the quote is saved.
+            </p>
+          </div>
           <label>
             Deposit
             <select
@@ -1094,7 +1465,7 @@ export function Dashboard() {
         </form>
       </section>
 
-      <section className="panel" id="quotes">
+      <section className="panel dashboard-section" data-admin-section="leads" id="quotes">
         <div className="section-heading">
           <p className="eyebrow">Quotes</p>
           <h2>Each quote needs a decision: approve it or remove the lead.</h2>
@@ -1184,7 +1555,7 @@ export function Dashboard() {
         </div>
       </section>
 
-      <section className="panel">
+      <section className="panel dashboard-section" data-admin-section="jobs">
         <div className="section-heading">
           <p className="eyebrow">Jobs</p>
           <h2>Approved work becomes a job and can generate an invoice.</h2>
@@ -1229,7 +1600,7 @@ export function Dashboard() {
         </div>
       </section>
 
-      <section className="panel" id="invoices">
+      <section className="panel dashboard-section" data-admin-section="invoices" id="invoices">
         <div className="section-heading">
           <p className="eyebrow">Invoices and Payments</p>
           <h2>Track what is owed now, then add payment processing later.</h2>
@@ -1424,7 +1795,7 @@ export function Dashboard() {
         </form>
       </section>
 
-      <section className="panel" id="expenses">
+      <section className="panel dashboard-section" data-admin-section="settings" id="expenses">
         <div className="section-heading">
           <p className="eyebrow">Expenses</p>
           <h2>Track materials, fuel, tools, and other costs for tax season.</h2>
@@ -1554,7 +1925,7 @@ export function Dashboard() {
         </form>
       </section>
 
-      <section className="panel">
+      <section className="panel dashboard-section" data-admin-section="settings">
         <div className="section-heading">
           <p className="eyebrow">Tax Season Snapshot</p>
           <h2>Simple reporting that can be exported later.</h2>
@@ -1673,6 +2044,7 @@ export function Dashboard() {
           </button>
         </div>
       </section>
+      </div>
     </div>
   );
 }

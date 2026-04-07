@@ -15,7 +15,10 @@ import {
   Payment,
   Quote,
   QuoteStatus,
-  QuoteLineItem
+  QuoteLineItem,
+  Task,
+  TaskPriority,
+  TaskStatus
 } from "@/lib/types";
 
 const STORAGE_KEY = "rooted-estimates-data";
@@ -33,6 +36,14 @@ function normalizeData(raw: Partial<AppData>): AppData {
     })),
     estimateRequests: raw.estimateRequests ?? defaultData.estimateRequests,
     notifications: raw.notifications ?? defaultData.notifications,
+    tasks: (raw.tasks ?? defaultData.tasks).map((task) => ({
+      ...task,
+      description: task.description ?? "",
+      dueDate: task.dueDate ?? new Date().toISOString().slice(0, 10),
+      status: task.status ?? "to_do",
+      priority: task.priority ?? "normal",
+      createdAt: task.createdAt ?? new Date().toISOString().slice(0, 10)
+    })),
     quotes: (raw.quotes ?? defaultData.quotes).map((quote) => {
       const legacyQuote = quote as Quote & {
         title?: string;
@@ -147,6 +158,12 @@ function makeId(prefix: string) {
   return `${prefix}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
+function dateOffset(days: number) {
+  const dueDate = new Date();
+  dueDate.setDate(dueDate.getDate() + days);
+  return dueDate.toISOString().slice(0, 10);
+}
+
 function normalizeMatchValue(value: string) {
   return value.trim().toLowerCase();
 }
@@ -219,13 +236,26 @@ export function createEstimateLead(
     read: false
   };
 
+  const followUpTask: Task = {
+    id: makeId("task"),
+    title: `Follow up with ${payload.fullName}`,
+    description: `New estimate request for ${payload.jobType}. Preferred time: ${payload.preferredSlot}.`,
+    dueDate: dateOffset(1),
+    status: "to_do",
+    priority: "high",
+    relatedLeadId: requestId,
+    relatedCustomerId: customerId,
+    createdAt: new Date().toISOString().slice(0, 10)
+  };
+
   return {
     ...data,
     customers: existingCustomer
       ? data.customers.map((item) => (item.id === existingCustomer.id ? customer : item))
       : [customer, ...data.customers],
     estimateRequests: [estimateRequest, ...data.estimateRequests],
-    notifications: [notification, ...data.notifications]
+    notifications: [notification, ...data.notifications],
+    tasks: [followUpTask, ...data.tasks]
   };
 }
 
@@ -302,6 +332,22 @@ export function createQuote(
 }
 
 export function sendQuote(data: AppData, quoteId: string): AppData {
+  const matchingQuote = data.quotes.find((quote) => quote.id === quoteId);
+  const quoteFollowUpTask: Task | null = matchingQuote
+    ? {
+        id: makeId("task"),
+        title: `Follow up on quote for ${matchingQuote.projectTitle}`,
+        description: `Check whether ${matchingQuote.customerName} wants to approve or decline this quote.`,
+        dueDate: dateOffset(3),
+        status: "to_do",
+        priority: "normal",
+        relatedCustomerId: matchingQuote.customerId,
+        relatedLeadId: matchingQuote.estimateRequestId,
+        relatedQuoteId: matchingQuote.id,
+        createdAt: new Date().toISOString().slice(0, 10)
+      }
+    : null;
+
   return {
     ...data,
     quotes: data.quotes.map((quote) =>
@@ -314,7 +360,8 @@ export function sendQuote(data: AppData, quoteId: string): AppData {
       }
 
       return { ...request, status: "quote sent" };
-    })
+    }),
+    tasks: quoteFollowUpTask ? [quoteFollowUpTask, ...data.tasks] : data.tasks
   };
 }
 
@@ -447,6 +494,20 @@ export function completeJobAndCreateInvoice(data: AppData, jobId: string): AppDa
     )
   };
 
+  const paymentFollowUpTask: Task = {
+    id: makeId("task"),
+    title: `Follow up on invoice for ${quote.projectTitle}`,
+    description: `Invoice ${invoice.id} was created. Confirm payment or follow up before the due date.`,
+    dueDate: invoice.dueAt,
+    status: "to_do",
+    priority: "normal",
+    relatedCustomerId: quote.customerId,
+    relatedJobId: job.id,
+    relatedQuoteId: quote.id,
+    relatedInvoiceId: invoice.id,
+    createdAt: new Date().toISOString().slice(0, 10)
+  };
+
   return {
     ...data,
     jobs: data.jobs.map((item) =>
@@ -458,6 +519,7 @@ export function completeJobAndCreateInvoice(data: AppData, jobId: string): AppDa
     invoices: existingInvoice
       ? data.invoices.map((item) => (item.id === existingInvoice.id ? invoice : item))
       : [invoice, ...data.invoices],
+    tasks: existingInvoice ? data.tasks : [paymentFollowUpTask, ...data.tasks],
     estimateRequests: data.estimateRequests.map((request) =>
       request.customerId === job.customerId ? { ...request, status: "completed" } : request
     )
@@ -524,6 +586,49 @@ export function recordPayment(
         ? { ...request, status: "paid" }
         : request
     )
+  };
+}
+
+export function createTask(
+  data: AppData,
+  payload: {
+    title: string;
+    description: string;
+    dueDate: string;
+    status: TaskStatus;
+    priority: TaskPriority;
+    relatedLeadId?: string;
+    relatedCustomerId?: string;
+    relatedJobId?: string;
+  }
+): AppData {
+  const task: Task = {
+    id: makeId("task"),
+    title: payload.title,
+    description: payload.description,
+    dueDate: payload.dueDate,
+    status: payload.status,
+    priority: payload.priority,
+    relatedLeadId: payload.relatedLeadId,
+    relatedCustomerId: payload.relatedCustomerId,
+    relatedJobId: payload.relatedJobId,
+    createdAt: new Date().toISOString().slice(0, 10)
+  };
+
+  return {
+    ...data,
+    tasks: [task, ...data.tasks]
+  };
+}
+
+export function updateTask(
+  data: AppData,
+  taskId: string,
+  updates: Partial<Pick<Task, "title" | "description" | "dueDate" | "status" | "priority">>
+): AppData {
+  return {
+    ...data,
+    tasks: data.tasks.map((task) => (task.id === taskId ? { ...task, ...updates } : task))
   };
 }
 
