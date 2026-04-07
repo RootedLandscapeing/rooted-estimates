@@ -9,7 +9,7 @@ import {
 import { printInvoicePdf, printQuotePdf } from "@/lib/documents";
 import { downloadCsv } from "@/lib/export";
 import { getInvoiceStatusLabel } from "@/lib/invoice-helpers";
-import { loadSupabaseEstimateWorkflow } from "@/lib/supabase/estimate-requests";
+import { loadSupabaseAppData, saveSupabaseAppData } from "@/lib/supabase/app-data";
 import {
   approveQuote,
   completeJobAndCreateInvoice,
@@ -114,20 +114,14 @@ export function Dashboard() {
     const localData = loadAppData();
     setData(localData);
 
-    loadSupabaseEstimateWorkflow()
-      .then((workflowData) => {
-        if (!workflowData) {
+    loadSupabaseAppData(localData)
+      .then((supabaseData) => {
+        if (!supabaseData) {
           return;
         }
 
-        const nextData = {
-          ...localData,
-          customers: workflowData.customers,
-          estimateRequests: workflowData.estimateRequests,
-          tasks: workflowData.tasks
-        };
-        setData(nextData);
-        saveAppData(nextData);
+        setData(supabaseData);
+        saveAppData(supabaseData);
       })
       .catch((error) => {
         console.error(error);
@@ -266,6 +260,9 @@ export function Dashboard() {
   function persist(nextData: AppData) {
     setData(nextData);
     saveAppData(nextData);
+    saveSupabaseAppData(nextData).catch((error) => {
+      console.error(error);
+    });
   }
 
   async function enableBrowserAlerts() {

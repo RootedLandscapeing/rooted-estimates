@@ -6,6 +6,7 @@ import {
   buildHourlyTimeOptions,
   getFirstAvailableDay
 } from "@/lib/availability";
+import { loadSupabasePublicContent } from "@/lib/supabase/app-data";
 import { createSupabaseEstimateRequest } from "@/lib/supabase/estimate-requests";
 import { createEstimateLead, loadAppData, saveAppData } from "@/lib/storage";
 import { AvailabilitySlot } from "@/lib/types";
@@ -33,8 +34,20 @@ export function RequestForm() {
   useEffect(() => {
     const currentAvailability = loadAppData().availability;
     setAvailability(currentAvailability);
+    applyAvailability(currentAvailability);
 
-    const firstAvailableDay = getFirstAvailableDay(currentAvailability);
+    loadSupabasePublicContent()
+      .then((publicContent) => {
+        setAvailability(publicContent.availability);
+        applyAvailability(publicContent.availability);
+      })
+      .catch((error) => {
+        console.error(error);
+      });
+  }, []);
+
+  function applyAvailability(nextAvailability: AvailabilitySlot[]) {
+    const firstAvailableDay = getFirstAvailableDay(nextAvailability);
     if (firstAvailableDay) {
       const firstTime = buildHourlyTimeOptions(firstAvailableDay)[0]?.value ?? "";
       setSelectedDay(firstAvailableDay.weekday);
@@ -46,7 +59,7 @@ export function RequestForm() {
           : ""
       }));
     }
-  }, []);
+  }
 
   const availableDays = useMemo(
     () => availability.filter((slot) => slot.isAvailable && buildHourlyTimeOptions(slot).length > 0),

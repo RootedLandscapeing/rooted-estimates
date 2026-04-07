@@ -5,6 +5,7 @@ import Image from "next/image";
 import { useEffect, useState } from "react";
 import { formatAvailabilityRange } from "@/lib/availability";
 import { RequestForm } from "@/components/request-form";
+import { loadSupabasePublicContent } from "@/lib/supabase/app-data";
 import { loadAppData } from "@/lib/storage";
 import { AvailabilitySlot } from "@/lib/types";
 
@@ -13,6 +14,14 @@ export default function RequestEstimatePage() {
 
   useEffect(() => {
     setAvailability(loadAppData().availability);
+
+    loadSupabasePublicContent()
+      .then((publicContent) => {
+        setAvailability(publicContent.availability);
+      })
+      .catch((error) => {
+        console.error(error);
+      });
   }, []);
 
   const availableSlots = availability.filter((slot) => slot.isAvailable);

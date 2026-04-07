@@ -3,6 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { loadSupabasePublicContent } from "@/lib/supabase/app-data";
 import { loadAppData } from "@/lib/storage";
 import { SiteContent } from "@/lib/types";
 import { defaultData } from "@/lib/mock-data";
@@ -12,6 +13,14 @@ export function HomeContent() {
 
   useEffect(() => {
     setContent(loadAppData().siteContent);
+
+    loadSupabasePublicContent()
+      .then((publicContent) => {
+        setContent(publicContent.siteContent);
+      })
+      .catch((error) => {
+        console.error(error);
+      });
   }, []);
 
   return (
