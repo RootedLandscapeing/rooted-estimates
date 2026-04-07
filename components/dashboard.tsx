@@ -72,8 +72,11 @@ const taskPriorityLabels: Record<TaskPriority, string> = {
 
 export function Dashboard() {
   const expenseReceiptInputRef = useRef<HTMLInputElement | null>(null);
+  const lastScrollYRef = useRef(0);
   const [data, setData] = useState<AppData | null>(null);
   const [activeSection, setActiveSection] = useState<AdminSection>("home");
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [isMobileMenuButtonVisible, setIsMobileMenuButtonVisible] = useState(true);
   const [selectedEstimateId, setSelectedEstimateId] = useState("");
   const [quoteTitle, setQuoteTitle] = useState("");
   const [quoteLines, setQuoteLines] = useState<QuoteLineItem[]>([starterLine]);
@@ -139,6 +142,32 @@ export function Dashboard() {
     setBrowserAlertsEnabled(Notification.permission === "granted");
   }, []);
 
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    lastScrollYRef.current = window.scrollY;
+
+    function handleScroll() {
+      const currentScrollY = window.scrollY;
+      const isNearTop = currentScrollY < 24;
+      const isScrollingUp = currentScrollY < lastScrollYRef.current - 6;
+      const isScrollingDown = currentScrollY > lastScrollYRef.current + 6;
+
+      if (isMobileMenuOpen || isNearTop || isScrollingUp) {
+        setIsMobileMenuButtonVisible(true);
+      } else if (isScrollingDown) {
+        setIsMobileMenuButtonVisible(false);
+      }
+
+      lastScrollYRef.current = currentScrollY;
+    }
+
+    window.addEventListener("scroll", handleScroll, { passive: true });
+    return () => window.removeEventListener("scroll", handleScroll);
+  }, [isMobileMenuOpen]);
+
   const estimateOptions = useMemo(() => {
     if (!data) {
       return [];
@@ -157,6 +186,24 @@ export function Dashboard() {
       };
     });
   }, [data]);
+
+  const quoteEstimateOptions = useMemo(() => {
+    if (!data) {
+      return [];
+    }
+
+    const closedStatuses = new Set(["approved", "declined", "completed", "paid"]);
+
+    return estimateOptions.filter((estimate) => {
+      const customer = data.customers.find((item) => item.id === estimate.customerId);
+      const alreadyQuoted = data.quotes.some(
+        (quote) => quote.estimateRequestId === estimate.id && quote.status !== "declined"
+      );
+
+      // Quote creation should only pull from active leads, not customers already moved forward.
+      return customer?.lifecycle === "lead" && !alreadyQuoted && !closedStatuses.has(estimate.status);
+    });
+  }, [data, estimateOptions]);
 
   useEffect(() => {
     if (!data || !selectedEstimateId) {
@@ -672,6 +719,11 @@ export function Dashboard() {
     persist(nextData);
   }
 
+  function chooseAdminSection(section: AdminSection) {
+    setActiveSection(section);
+    setIsMobileMenuOpen(false);
+  }
+
   const navItems: Array<{ id: AdminSection; label: string; count?: number }> = [
     { id: "home", label: "Dashboard" },
     { id: "leads", label: "Leads / Estimates", count: estimateOptions.length },
@@ -686,7 +738,33 @@ export function Dashboard() {
 
   return (
     <div className="admin-layout">
-      <aside className="admin-sidebar">
+      <button
+        type="button"
+        className={`mobile-menu-toggle ${isMobileMenuOpen ? "open" : ""} ${
+          isMobileMenuButtonVisible ? "visible" : "hidden"
+        }`}
+        aria-controls="admin-mobile-menu"
+        aria-expanded={isMobileMenuOpen}
+        aria-label={isMobileMenuOpen ? "Close admin menu" : "Open admin menu"}
+        onClick={() => setIsMobileMenuOpen((current) => !current)}
+      >
+        <span />
+        <span />
+        <span />
+      </button>
+      {isMobileMenuOpen ? (
+        <button
+          type="button"
+          className="mobile-menu-scrim"
+          aria-label="Close admin menu"
+          onClick={() => setIsMobileMenuOpen(false)}
+        />
+      ) : null}
+
+      <aside
+        id="admin-mobile-menu"
+        className={`admin-sidebar ${isMobileMenuOpen ? "mobile-open" : ""}`}
+      >
         <p className="eyebrow">Admin Menu</p>
         <nav className="sidebar-nav" aria-label="Dashboard sections">
           {navItems.map((item) => (
@@ -694,7 +772,7 @@ export function Dashboard() {
               key={item.id}
               type="button"
               className={activeSection === item.id ? "sidebar-nav-item active" : "sidebar-nav-item"}
-              onClick={() => setActiveSection(item.id)}
+              onClick={() => chooseAdminSection(item.id)}
             >
               <span>{item.label}</span>
               {typeof item.count === "number" ? <strong>{item.count}</strong> : null}
@@ -713,7 +791,7 @@ export function Dashboard() {
           <button
             type="button"
             className="action-tile action-tile-button"
-            onClick={() => setActiveSection("leads")}
+            onClick={() => chooseAdminSection("leads")}
           >
             <strong>Create Quote</strong>
             <span>Price a lead and send the agreement.</span>
@@ -721,7 +799,7 @@ export function Dashboard() {
           <button
             type="button"
             className="action-tile action-tile-button"
-            onClick={() => setActiveSection("leads")}
+            onClick={() => chooseAdminSection("leads")}
           >
             <strong>Review Quotes</strong>
             <span>Approve, deny, or print the customer copy.</span>
@@ -729,7 +807,7 @@ export function Dashboard() {
           <button
             type="button"
             className="action-tile action-tile-button"
-            onClick={() => setActiveSection("invoices")}
+            onClick={() => chooseAdminSection("invoices")}
           >
             <strong>Record Payment</strong>
             <span>Update invoices and move jobs into history.</span>
@@ -737,7 +815,7 @@ export function Dashboard() {
           <button
             type="button"
             className="action-tile action-tile-button"
-            onClick={() => setActiveSection("settings")}
+            onClick={() => chooseAdminSection("settings")}
           >
             <strong>Log Expense</strong>
             <span>Track receipts and tax-season costs quickly.</span>
@@ -1051,27 +1129,27 @@ export function Dashboard() {
         </section>
 
       <section className="panel summary-grid dashboard-section" data-admin-section="home">
-        <button type="button" className="summary-card summary-card-button" onClick={() => setActiveSection("leads")}>
+        <button type="button" className="summary-card summary-card-button" onClick={() => chooseAdminSection("leads")}>
           <span>New estimate requests</span>
           <strong>{totals.totalLeads}</strong>
         </button>
-        <button type="button" className="summary-card summary-card-button" onClick={() => setActiveSection("leads")}>
+        <button type="button" className="summary-card summary-card-button" onClick={() => chooseAdminSection("leads")}>
           <span>Quotes sent</span>
           <strong>{totals.activeQuotes}</strong>
         </button>
-        <button type="button" className="summary-card summary-card-button" onClick={() => setActiveSection("jobs")}>
+        <button type="button" className="summary-card summary-card-button" onClick={() => chooseAdminSection("jobs")}>
           <span>Active jobs</span>
           <strong>{data.jobs.filter((job) => job.status !== "completed").length}</strong>
         </button>
-        <button type="button" className="summary-card summary-card-button" onClick={() => setActiveSection("invoices")}>
+        <button type="button" className="summary-card summary-card-button" onClick={() => chooseAdminSection("invoices")}>
           <span>Unpaid invoices</span>
           <strong>{totals.unpaidInvoices}</strong>
         </button>
-        <button type="button" className="summary-card summary-card-button attention" onClick={() => setActiveSection("tasks")}>
+        <button type="button" className="summary-card summary-card-button attention" onClick={() => chooseAdminSection("tasks")}>
           <span>Overdue tasks</span>
           <strong>{taskBuckets.overdue.length}</strong>
         </button>
-        <button type="button" className="summary-card summary-card-button accent" onClick={() => setActiveSection("tasks")}>
+        <button type="button" className="summary-card summary-card-button accent" onClick={() => chooseAdminSection("tasks")}>
           <span>Tasks due this week</span>
           <strong>{taskBuckets.week.length}</strong>
         </button>
@@ -1352,7 +1430,7 @@ export function Dashboard() {
               required
             >
               <option value="">Choose a lead</option>
-              {estimateOptions.map((estimate) => (
+              {quoteEstimateOptions.map((estimate) => (
                 <option key={estimate.id} value={estimate.id}>
                   {estimate.customerName} - {estimate.jobType}
                 </option>
@@ -1486,9 +1564,6 @@ export function Dashboard() {
           </div>
 
           <div className="full-width form-actions sticky-actions">
-            <button type="button" className="button-secondary" onClick={addLine}>
-              Add Line
-            </button>
             <button type="submit" className="button-primary">
               Save Quote
             </button>
