@@ -24,7 +24,10 @@ function dateOffset(days: number) {
 
 export async function POST(request: Request) {
   if (!isSupabaseServerConfigured()) {
-    return NextResponse.json({ error: "Estimate intake is not configured yet." }, { status: 500 });
+    return NextResponse.json(
+      { error: "Estimate intake server configuration is missing." },
+      { status: 500 }
+    );
   }
 
   const payload = (await request.json()) as EstimateNotificationPayload;
@@ -49,6 +52,7 @@ export async function POST(request: Request) {
     .limit(1);
 
   if (customerLookupError) {
+    console.error("Estimate intake customer lookup failed:", customerLookupError);
     return NextResponse.json(
       { error: "We couldn't save the estimate request right now. Please try again." },
       { status: 500 }
@@ -71,6 +75,7 @@ export async function POST(request: Request) {
     : await supabase.from("customers").insert(customerPayload).select("id").single();
 
   if (customerResult.error || !customerResult.data) {
+    console.error("Estimate intake customer save failed:", customerResult.error);
     return NextResponse.json(
       { error: "We couldn't save the estimate request right now. Please try again." },
       { status: 500 }
@@ -91,6 +96,7 @@ export async function POST(request: Request) {
     .single();
 
   if (estimateError || !estimateRequest) {
+    console.error("Estimate intake request save failed:", estimateError);
     return NextResponse.json(
       { error: "We couldn't save the estimate request right now. Please try again." },
       { status: 500 }
@@ -108,6 +114,7 @@ export async function POST(request: Request) {
   });
 
   if (taskError) {
+    console.error("Estimate intake follow-up task save failed:", taskError);
     return NextResponse.json(
       { error: "We couldn't save the estimate request right now. Please try again." },
       { status: 500 }
