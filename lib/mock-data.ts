@@ -33,6 +33,7 @@ export const defaultData: AppData = {
   ],
   notifications: [],
   tasks: [],
+  timeEntries: [],
   quotes: [
     {
       id: "quote-1",

@@ -31,6 +31,17 @@ export type ExpenseCategory =
   | "other";
 export type TaskStatus = "to_do" | "in_progress" | "waiting_on_customer" | "completed";
 export type TaskPriority = "high" | "normal" | "low";
+export type TimeCategory =
+  | "on_site_work"
+  | "travel"
+  | "loading_trailer"
+  | "dump_run"
+  | "getting_materials"
+  | "fuel_stop"
+  | "equipment_maintenance"
+  | "estimate_appointment"
+  | "admin_office"
+  | "other";
 
 export type EstimateRequest = {
   id: string;
@@ -199,6 +210,20 @@ export type Task = {
   createdAt: string;
 };
 
+export type TimeEntry = {
+  id: string;
+  entryDate: string;
+  category: TimeCategory;
+  note: string;
+  customerId?: string;
+  jobId?: string;
+  startedAt?: string;
+  endedAt?: string;
+  minutes: number;
+  isRunning: boolean;
+  createdAt: string;
+};
+
 export type FeaturedProject = {
   id: string;
   title: string;
@@ -227,6 +252,7 @@ export type AppData = {
   estimateRequests: EstimateRequest[];
   notifications: AppNotification[];
   tasks: Task[];
+  timeEntries: TimeEntry[];
   quotes: Quote[];
   jobs: Job[];
   invoices: Invoice[];

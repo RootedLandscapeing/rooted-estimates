@@ -18,7 +18,9 @@ import {
   QuoteLineItem,
   Task,
   TaskPriority,
-  TaskStatus
+  TaskStatus,
+  TimeCategory,
+  TimeEntry
 } from "@/lib/types";
 
 const STORAGE_KEY = "rooted-estimates-data";
@@ -43,6 +45,14 @@ function normalizeData(raw: Partial<AppData>): AppData {
       status: task.status ?? "to_do",
       priority: task.priority ?? "normal",
       createdAt: task.createdAt ?? new Date().toISOString().slice(0, 10)
+    })),
+    timeEntries: (raw.timeEntries ?? defaultData.timeEntries).map((entry) => ({
+      ...entry,
+      entryDate: entry.entryDate ?? new Date().toISOString().slice(0, 10),
+      note: entry.note ?? "",
+      minutes: entry.minutes ?? 0,
+      isRunning: entry.isRunning ?? false,
+      createdAt: entry.createdAt ?? new Date().toISOString().slice(0, 10)
     })),
     quotes: (raw.quotes ?? defaultData.quotes).map((quote) => {
       const legacyQuote = quote as Quote & {
@@ -259,6 +269,18 @@ export function createEstimateLead(
   };
 }
 
+function buildScheduledEstimateLabel(estimateDate: string, estimateTime: string) {
+  const dateTime = new Date(`${estimateDate}T${estimateTime}:00`);
+  return `Scheduled for ${dateTime.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric"
+  })} at ${dateTime.toLocaleTimeString([], {
+    hour: "numeric",
+    minute: "2-digit"
+  })}`;
+}
+
 export function markNotificationsRead(data: AppData, notificationIds?: string[]): AppData {
   const idsToMark = notificationIds?.length ? new Set(notificationIds) : null;
 
@@ -328,6 +350,50 @@ export function createQuote(
         ? { ...request, status: "estimate completed" }
         : request
     )
+  };
+}
+
+export function scheduleEstimate(
+  data: AppData,
+  payload: {
+    estimateRequestId: string;
+    estimateDate: string;
+    estimateTime: string;
+    note?: string;
+  }
+): AppData {
+  const estimate = data.estimateRequests.find((item) => item.id === payload.estimateRequestId);
+  if (!estimate) {
+    return data;
+  }
+
+  const customer = data.customers.find((item) => item.id === estimate.customerId);
+  const scheduledLabel = buildScheduledEstimateLabel(payload.estimateDate, payload.estimateTime);
+  const scheduleTask: Task = {
+    id: makeId("task"),
+    title: `Estimate scheduled for ${customer?.fullName ?? estimate.jobType}`,
+    description: [
+      `${estimate.jobType} scheduled for ${scheduledLabel}.`,
+      payload.note?.trim() ? `Note: ${payload.note.trim()}` : ""
+    ]
+      .filter(Boolean)
+      .join(" "),
+    dueDate: payload.estimateDate,
+    status: "to_do",
+    priority: "high",
+    relatedLeadId: estimate.id,
+    relatedCustomerId: estimate.customerId,
+    createdAt: new Date().toISOString().slice(0, 10)
+  };
+
+  return {
+    ...data,
+    estimateRequests: data.estimateRequests.map((request) =>
+      request.id === estimate.id
+        ? { ...request, status: "estimate scheduled", preferredSlot: scheduledLabel }
+        : request
+    ),
+    tasks: [scheduleTask, ...data.tasks]
   };
 }
 
@@ -660,5 +726,66 @@ export function recordExpense(
   return {
     ...data,
     expenses: [expense, ...data.expenses]
+  };
+}
+
+export function startTimeEntry(
+  data: AppData,
+  payload: {
+    category: TimeCategory;
+    note: string;
+    customerId?: string;
+    jobId?: string;
+  }
+): AppData {
+  if (data.timeEntries.some((entry) => entry.isRunning)) {
+    return data;
+  }
+
+  const now = new Date();
+  const timeEntry: TimeEntry = {
+    id: makeId("time"),
+    entryDate: now.toISOString().slice(0, 10),
+    category: payload.category,
+    note: payload.note,
+    customerId: payload.customerId,
+    jobId: payload.jobId,
+    startedAt: now.toISOString(),
+    endedAt: undefined,
+    minutes: 0,
+    isRunning: true,
+    createdAt: now.toISOString().slice(0, 10)
+  };
+
+  return {
+    ...data,
+    timeEntries: [timeEntry, ...data.timeEntries]
+  };
+}
+
+export function stopTimeEntry(data: AppData, timeEntryId: string): AppData {
+  const timeEntry = data.timeEntries.find((entry) => entry.id === timeEntryId && entry.isRunning);
+  if (!timeEntry || !timeEntry.startedAt) {
+    return data;
+  }
+
+  const endedAt = new Date().toISOString();
+  const elapsedMinutes = Math.max(
+    1,
+    Math.round((new Date(endedAt).getTime() - new Date(timeEntry.startedAt).getTime()) / 60000)
+  );
+
+  return {
+    ...data,
+    timeEntries: data.timeEntries.map((entry) =>
+      entry.id === timeEntryId
+        ? {
+            ...entry,
+            endedAt,
+            minutes: elapsedMinutes,
+            isRunning: false
+          }
+        : entry
+    )
   };
 }

@@ -22,7 +22,10 @@ import {
   recordExpense,
   recordPayment,
   saveAppData,
+  scheduleEstimate,
   sendQuote,
+  startTimeEntry,
+  stopTimeEntry,
   updateTask
 } from "@/lib/storage";
 import {
@@ -33,7 +36,9 @@ import {
   QuoteLineItem,
   Task,
   TaskPriority,
-  TaskStatus
+  TaskStatus,
+  TimeCategory,
+  TimeEntry
 } from "@/lib/types";
 
 const starterLine: QuoteLineItem = {
@@ -51,6 +56,7 @@ type AdminSection =
   | "leads"
   | "jobs"
   | "tasks"
+  | "time"
   | "customers"
   | "invoices"
   | "landing"
@@ -70,6 +76,19 @@ const taskPriorityLabels: Record<TaskPriority, string> = {
   low: "Low"
 };
 
+const timeCategoryLabels: Record<TimeCategory, string> = {
+  on_site_work: "On Site Work",
+  travel: "Travel",
+  loading_trailer: "Loading Trailer",
+  dump_run: "Dump Run",
+  getting_materials: "Getting Materials",
+  fuel_stop: "Fuel / Gas Stop",
+  equipment_maintenance: "Equipment Maintenance",
+  estimate_appointment: "Estimate Appointment",
+  admin_office: "Admin / Office",
+  other: "Other"
+};
+
 export function Dashboard() {
   const expenseReceiptInputRef = useRef<HTMLInputElement | null>(null);
   const lastScrollYRef = useRef(0);
@@ -77,8 +96,11 @@ export function Dashboard() {
   const [activeSection, setActiveSection] = useState<AdminSection>("home");
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isMobileMenuButtonVisible, setIsMobileMenuButtonVisible] = useState(true);
+  const [quoteSourceMode, setQuoteSourceMode] = useState<"lead" | "customer">("lead");
   const [selectedEstimateId, setSelectedEstimateId] = useState("");
+  const [selectedCustomerId, setSelectedCustomerId] = useState("");
   const [quoteTitle, setQuoteTitle] = useState("");
+  const [quoteScope, setQuoteScope] = useState("");
   const [quoteLines, setQuoteLines] = useState<QuoteLineItem[]>([starterLine]);
   const [laborPeople, setLaborPeople] = useState("");
   const [laborHours, setLaborHours] = useState("");
@@ -115,6 +137,20 @@ export function Dashboard() {
   const [taskPriority, setTaskPriority] = useState<TaskPriority>("normal");
   const [taskRelatedCustomerId, setTaskRelatedCustomerId] = useState("");
   const [taskRelatedJobId, setTaskRelatedJobId] = useState("");
+  const [scheduleEstimateId, setScheduleEstimateId] = useState("");
+  const [scheduleDate, setScheduleDate] = useState(new Date().toISOString().slice(0, 10));
+  const [scheduleTime, setScheduleTime] = useState("09:00");
+  const [scheduleNote, setScheduleNote] = useState("");
+  const [scheduleFeedback, setScheduleFeedback] = useState("");
+  const [scheduleError, setScheduleError] = useState("");
+  const [isSendingSchedule, setIsSendingSchedule] = useState(false);
+  const [timeEntryCategory, setTimeEntryCategory] = useState<TimeCategory>("on_site_work");
+  const [timeEntryNote, setTimeEntryNote] = useState("");
+  const [timeEntryCustomerId, setTimeEntryCustomerId] = useState("");
+  const [timeEntryJobId, setTimeEntryJobId] = useState("");
+  const [timeFilter, setTimeFilter] = useState<"week" | "month" | "all">("week");
+  const [timeCategoryFilter, setTimeCategoryFilter] = useState<TimeCategory | "all">("all");
+  const [timerTick, setTimerTick] = useState(Date.now());
 
   useEffect(() => {
     const localData = loadAppData();
@@ -206,15 +242,34 @@ export function Dashboard() {
   }, [data, estimateOptions]);
 
   useEffect(() => {
-    if (!data || !selectedEstimateId) {
+    if (!data || !selectedEstimateId || quoteSourceMode !== "lead") {
       return;
     }
 
     const estimate = data.estimateRequests.find((item) => item.id === selectedEstimateId);
     if (estimate) {
       setQuoteTitle(estimate.jobType);
+      setQuoteScope(estimate.description);
     }
-  }, [data, selectedEstimateId]);
+  }, [data, quoteSourceMode, selectedEstimateId]);
+
+  useEffect(() => {
+    setSelectedEstimateId("");
+    setSelectedCustomerId("");
+    setQuoteTitle("");
+    setQuoteScope("");
+  }, [quoteSourceMode]);
+
+  useEffect(() => {
+    if (!data || !selectedCustomerId || quoteSourceMode !== "customer") {
+      return;
+    }
+
+    const customer = data.customers.find((item) => item.id === selectedCustomerId);
+    if (customer && !quoteTitle.trim()) {
+      setQuoteTitle(`Additional Work for ${customer.fullName}`);
+    }
+  }, [data, quoteSourceMode, selectedCustomerId, quoteTitle]);
 
   const leadCustomers = useMemo(
     () => data?.customers.filter((customer) => customer.lifecycle === "lead") ?? [],
@@ -231,6 +286,29 @@ export function Dashboard() {
     [data]
   );
 
+  const quoteCustomers = useMemo(
+    () =>
+      data?.customers.filter((customer) => customer.lifecycle === "active" || customer.lifecycle === "archived") ??
+      [],
+    [data]
+  );
+
+  const pendingQuoteLeads = useMemo(
+    () =>
+      quoteEstimateOptions.filter((estimate) =>
+        ["new lead", "estimate scheduled", "estimate completed"].includes(estimate.status)
+      ),
+    [quoteEstimateOptions]
+  );
+
+  const quotedLeadHistory = useMemo(
+    () =>
+      estimateOptions.filter((estimate) =>
+        ["quote sent", "approved", "declined", "completed", "paid"].includes(estimate.status)
+      ),
+    [estimateOptions]
+  );
+
   const totals = useMemo(() => {
     if (!data) {
       return {
@@ -245,6 +323,11 @@ export function Dashboard() {
 
     return {
       totalLeads: data.estimateRequests.length,
+      needsQuote: data.estimateRequests.filter((request) =>
+        ["new lead", "estimate scheduled", "estimate completed"].includes(request.status)
+      ).filter((request) =>
+        !data.quotes.some((quote) => quote.estimateRequestId === request.id && quote.status !== "declined")
+      ).length,
       activeQuotes: data.quotes.filter((quote) => quote.status === "sent").length,
       completedJobs: data.jobs.filter((job) => job.status === "completed").length,
       unpaidInvoices: data.invoices.filter((invoice) => invoice.status !== "paid").length,
@@ -284,6 +367,65 @@ export function Dashboard() {
   }, [data]);
 
   const visibleTasks = taskBuckets[taskView];
+
+  const runningTimeEntry = useMemo(
+    () => data?.timeEntries.find((entry) => entry.isRunning),
+    [data]
+  );
+
+  useEffect(() => {
+    if (!runningTimeEntry) {
+      return;
+    }
+
+    const interval = window.setInterval(() => setTimerTick(Date.now()), 1000);
+    return () => window.clearInterval(interval);
+  }, [runningTimeEntry]);
+
+  const filteredTimeEntries = useMemo(() => {
+    if (!data) {
+      return [];
+    }
+
+    const now = new Date();
+    const weekStart = new Date(now);
+    weekStart.setDate(now.getDate() - 7);
+    const monthStart = new Date(now);
+    monthStart.setMonth(now.getMonth() - 1);
+
+    return data.timeEntries.filter((entry) => {
+      if (timeCategoryFilter !== "all" && entry.category !== timeCategoryFilter) {
+        return false;
+      }
+
+      const entryDate = new Date(`${entry.entryDate}T00:00:00`);
+      if (timeFilter === "week") {
+        return entryDate >= weekStart;
+      }
+      if (timeFilter === "month") {
+        return entryDate >= monthStart;
+      }
+
+      return true;
+    });
+  }, [data, timeCategoryFilter, timeFilter]);
+
+  const timeSummaryByCategory = useMemo(() => {
+    const totals = new Map<TimeCategory, number>();
+
+    filteredTimeEntries.forEach((entry) => {
+      const existingMinutes = totals.get(entry.category) ?? 0;
+      const runningMinutes =
+        entry.isRunning && entry.startedAt
+          ? Math.max(1, Math.round((timerTick - new Date(entry.startedAt).getTime()) / 60000))
+          : entry.minutes;
+      totals.set(entry.category, existingMinutes + runningMinutes);
+    });
+
+    return Array.from(totals.entries())
+      .map(([category, minutes]) => ({ category, minutes }))
+      .sort((left, right) => right.minutes - left.minutes);
+  }, [filteredTimeEntries, timerTick]);
 
   useEffect(() => {
     if (!browserAlertsEnabled || typeof window === "undefined" || typeof Notification === "undefined") {
@@ -431,8 +573,18 @@ export function Dashboard() {
       return;
     }
 
-    const estimate = data.estimateRequests.find((item) => item.id === selectedEstimateId);
-    if (!estimate) {
+    const estimate =
+      quoteSourceMode === "lead"
+        ? data.estimateRequests.find((item) => item.id === selectedEstimateId)
+        : undefined;
+    const customer =
+      quoteSourceMode === "lead"
+        ? estimate
+          ? data.customers.find((item) => item.id === estimate.customerId)
+          : undefined
+        : data.customers.find((item) => item.id === selectedCustomerId);
+
+    if (!customer) {
       return;
     }
 
@@ -457,20 +609,15 @@ export function Dashboard() {
       return;
     }
 
-    const customer = data.customers.find((item) => item.id === estimate.customerId);
-    if (!customer) {
-      return;
-    }
-
     const nextData = createQuote(data, {
-      customerId: estimate.customerId,
-      estimateRequestId: estimate.id,
+      customerId: customer.id,
+      estimateRequestId: estimate?.id,
       customerName: customer.fullName,
       customerAddress: customer.address,
       customerPhone: customer.phone,
       customerEmail: customer.email,
-      projectTitle: quoteTitle || estimate.jobType,
-      scope: estimate.description,
+      projectTitle: quoteTitle || estimate?.jobType || "Additional Work",
+      scope: quoteScope || estimate?.description || "",
       items: lineItems,
       depositType:
         depositMode === "none"
@@ -495,8 +642,11 @@ export function Dashboard() {
     });
 
     persist(nextData);
+    setQuoteSourceMode("lead");
     setQuoteTitle("");
+    setQuoteScope("");
     setSelectedEstimateId("");
+    setSelectedCustomerId("");
     setQuoteLines([starterLine]);
     setLaborPeople("");
     setLaborHours("");
@@ -504,6 +654,69 @@ export function Dashboard() {
     setDepositAmount("");
     setDepositPercent("");
     setContractorSignature("Rooted Representative");
+  }
+
+  async function handleScheduleEstimate(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!data || !scheduleEstimateId || !scheduleDate || !scheduleTime) {
+      return;
+    }
+
+    const estimate = data.estimateRequests.find((item) => item.id === scheduleEstimateId);
+    const customer = estimate
+      ? data.customers.find((item) => item.id === estimate.customerId)
+      : undefined;
+
+    if (!estimate || !customer) {
+      return;
+    }
+
+    setScheduleFeedback("");
+    setScheduleError("");
+    setIsSendingSchedule(true);
+
+    const nextData = scheduleEstimate(data, {
+      estimateRequestId: scheduleEstimateId,
+      estimateDate: scheduleDate,
+      estimateTime: scheduleTime,
+      note: scheduleNote
+    });
+
+    persist(nextData);
+
+    try {
+      const response = await fetch("/api/schedule-estimate", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          customerName: customer.fullName,
+          customerEmail: customer.email,
+          estimateDate: scheduleDate,
+          estimateTime: scheduleTime,
+          projectTitle: estimate.jobType,
+          note: scheduleNote
+        })
+      });
+
+      const result = (await response.json().catch(() => null)) as { error?: string } | null;
+
+      if (!response.ok) {
+        setScheduleError(result?.error ?? "The estimate was scheduled, but the email could not be sent.");
+      } else {
+        setScheduleFeedback(`Estimate email sent to ${customer.fullName}.`);
+      }
+    } catch (error) {
+      console.error(error);
+      setScheduleError("The estimate was scheduled, but the email could not be sent.");
+    } finally {
+      setIsSendingSchedule(false);
+      setScheduleEstimateId("");
+      setScheduleDate(new Date().toISOString().slice(0, 10));
+      setScheduleTime("09:00");
+      setScheduleNote("");
+    }
   }
 
   function handleRecordPayment(event: React.FormEvent<HTMLFormElement>) {
@@ -719,6 +932,39 @@ export function Dashboard() {
     persist(nextData);
   }
 
+  function handleStartTimeEntry(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!data || runningTimeEntry) {
+      return;
+    }
+
+    persist(
+      startTimeEntry(data, {
+        category: timeEntryCategory,
+        note: timeEntryNote,
+        customerId: timeEntryCustomerId || undefined,
+        jobId: timeEntryJobId || undefined
+      })
+    );
+    setTimeEntryNote("");
+    setTimeEntryCustomerId("");
+    setTimeEntryJobId("");
+  }
+
+  function handleStopTimeEntry() {
+    if (!data || !runningTimeEntry) {
+      return;
+    }
+
+    persist(stopTimeEntry(data, runningTimeEntry.id));
+  }
+
+  function formatMinutes(minutes: number) {
+    const hours = Math.floor(minutes / 60);
+    const remainingMinutes = minutes % 60;
+    return hours > 0 ? `${hours}h ${remainingMinutes}m` : `${remainingMinutes}m`;
+  }
+
   function chooseAdminSection(section: AdminSection) {
     setActiveSection(section);
     setIsMobileMenuOpen(false);
@@ -726,9 +972,10 @@ export function Dashboard() {
 
   const navItems: Array<{ id: AdminSection; label: string; count?: number }> = [
     { id: "home", label: "Dashboard" },
-    { id: "leads", label: "Leads / Estimates", count: estimateOptions.length },
+    { id: "leads", label: "Leads / Estimates", count: pendingQuoteLeads.length },
     { id: "jobs", label: "Jobs / Projects", count: data.jobs.length },
     { id: "tasks", label: "Tasks / Reminders", count: taskBuckets.overdue.length + taskBuckets.today.length },
+    { id: "time", label: "Time Clock", count: data.timeEntries.filter((entry) => entry.isRunning).length },
     { id: "customers", label: "Customers", count: activeCustomers.length },
     { id: "invoices", label: "Invoices / Payments", count: activeInvoices.length },
     { id: "landing", label: "Edit Landing Page" },
@@ -1134,8 +1381,8 @@ export function Dashboard() {
           <strong>{totals.totalLeads}</strong>
         </button>
         <button type="button" className="summary-card summary-card-button" onClick={() => chooseAdminSection("leads")}>
-          <span>Quotes sent</span>
-          <strong>{totals.activeQuotes}</strong>
+          <span>Needs quote</span>
+          <strong>{totals.needsQuote}</strong>
         </button>
         <button type="button" className="summary-card summary-card-button" onClick={() => chooseAdminSection("jobs")}>
           <span>Active jobs</span>
@@ -1152,6 +1399,10 @@ export function Dashboard() {
         <button type="button" className="summary-card summary-card-button accent" onClick={() => chooseAdminSection("tasks")}>
           <span>Tasks due this week</span>
           <strong>{taskBuckets.week.length}</strong>
+        </button>
+        <button type="button" className="summary-card summary-card-button" onClick={() => chooseAdminSection("time")}>
+          <span>Time logged</span>
+          <strong>{formatMinutes(filteredTimeEntries.reduce((sum, entry) => sum + entry.minutes, 0))}</strong>
         </button>
       </section>
 
@@ -1317,10 +1568,181 @@ export function Dashboard() {
         </form>
       </section>
 
+      <section className="panel dashboard-section" data-admin-section="time">
+        <div className="section-heading">
+          <p className="eyebrow">Time Clock</p>
+          <h2>Track where the day goes so pricing and operations get sharper over time.</h2>
+        </div>
+
+        {runningTimeEntry ? (
+          <div className="sticky-actions">
+            <div>
+              <strong>
+                Running: {timeCategoryLabels[runningTimeEntry.category]} •{" "}
+                {formatMinutes(
+                  Math.max(
+                    1,
+                    Math.round((timerTick - new Date(runningTimeEntry.startedAt ?? Date.now()).getTime()) / 60000)
+                  )
+                )}
+              </strong>
+              <p className="hero-card-copy">
+                {runningTimeEntry.note || "No note added."}
+              </p>
+            </div>
+            <div className="inline-actions">
+              <button type="button" className="button-primary" onClick={handleStopTimeEntry}>
+                Stop Timer
+              </button>
+            </div>
+          </div>
+        ) : null}
+
+        <form className="form-grid top-gap" onSubmit={handleStartTimeEntry}>
+          <label>
+            Category
+            <select
+              value={timeEntryCategory}
+              onChange={(event) => setTimeEntryCategory(event.target.value as TimeCategory)}
+            >
+              {Object.entries(timeCategoryLabels).map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Customer
+            <select
+              value={timeEntryCustomerId}
+              onChange={(event) => setTimeEntryCustomerId(event.target.value)}
+            >
+              <option value="">No customer linked</option>
+              {data.customers.map((customer) => (
+                <option key={customer.id} value={customer.id}>
+                  {customer.fullName}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Job
+            <select value={timeEntryJobId} onChange={(event) => setTimeEntryJobId(event.target.value)}>
+              <option value="">No job linked</option>
+              {data.jobs.map((job) => (
+                <option key={job.id} value={job.id}>
+                  {job.title}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="full-width">
+            Note
+            <input
+              value={timeEntryNote}
+              onChange={(event) => setTimeEntryNote(event.target.value)}
+              placeholder="Front yard cleanup, loading trailer, fuel stop..."
+            />
+          </label>
+          <div className="full-width form-actions">
+            <button type="submit" className="button-primary" disabled={Boolean(runningTimeEntry)}>
+              {runningTimeEntry ? "Timer Already Running" : "Start Timer"}
+            </button>
+          </div>
+        </form>
+
+        <div className="task-filter-row top-gap" aria-label="Time views">
+          {[
+            { id: "week", label: "Last 7 Days" },
+            { id: "month", label: "Last 30 Days" },
+            { id: "all", label: "All Time" }
+          ].map((view) => (
+            <button
+              key={view.id}
+              type="button"
+              className={timeFilter === view.id ? "task-filter active" : "task-filter"}
+              onClick={() => setTimeFilter(view.id as typeof timeFilter)}
+            >
+              {view.label}
+            </button>
+          ))}
+        </div>
+
+        <div className="inline-actions top-gap">
+          <select
+            value={timeCategoryFilter}
+            onChange={(event) => setTimeCategoryFilter(event.target.value as TimeCategory | "all")}
+          >
+            <option value="all">All categories</option>
+            {Object.entries(timeCategoryLabels).map(([value, label]) => (
+              <option key={value} value={value}>
+                {label}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="stack top-gap">
+          {timeSummaryByCategory.map((entry) => {
+            const maxMinutes = timeSummaryByCategory[0]?.minutes ?? 1;
+            return (
+              <article key={entry.category} className="list-card">
+                <div className="card-copy">
+                  <h3>{timeCategoryLabels[entry.category]}</h3>
+                  <div className="time-bar-track">
+                    <div
+                      className="time-bar-fill"
+                      style={{ width: `${Math.max(8, (entry.minutes / maxMinutes) * 100)}%` }}
+                    />
+                  </div>
+                </div>
+                <span className="pill">{formatMinutes(entry.minutes)}</span>
+              </article>
+            );
+          })}
+          {!timeSummaryByCategory.length ? (
+            <p className="empty-state">Start logging time to see where the hours are going.</p>
+          ) : null}
+        </div>
+
+        <div className="stack top-gap">
+          {filteredTimeEntries.map((entry) => {
+            const customer = data.customers.find((item) => item.id === entry.customerId);
+            const job = data.jobs.find((item) => item.id === entry.jobId);
+            const runningMinutes =
+              entry.isRunning && entry.startedAt
+                ? Math.max(1, Math.round((timerTick - new Date(entry.startedAt).getTime()) / 60000))
+                : entry.minutes;
+            return (
+              <article key={entry.id} className="list-card split-card">
+                <div className="card-copy">
+                  <h3>{timeCategoryLabels[entry.category]}</h3>
+                  <p>{entry.note || "No note added."}</p>
+                  <div className="timestamp-list">
+                    <span>{entry.entryDate}</span>
+                    {customer ? <span>Customer: {customer.fullName}</span> : null}
+                    {job ? <span>Job: {job.title}</span> : null}
+                  </div>
+                </div>
+                <div className="action-stack">
+                  <span className={`pill ${entry.isRunning ? "accent-pill" : ""}`}>
+                    {entry.isRunning ? "running" : formatMinutes(runningMinutes)}
+                  </span>
+                </div>
+              </article>
+            );
+          })}
+          {!filteredTimeEntries.length ? (
+            <p className="empty-state">No time entries in this filter yet.</p>
+          ) : null}
+        </div>
+      </section>
+
       <section className="panel dashboard-section" data-admin-section="leads">
         <div className="section-heading">
-          <p className="eyebrow">Leads</p>
-          <h2>People waiting on an estimate or quote decision.</h2>
+          <p className="eyebrow">Lead Contacts</p>
+          <h2>Everyone still in lead status lives here until work is approved.</h2>
         </div>
         <div className="stack">
           {leadCustomers.map((customer) => (
@@ -1389,11 +1811,11 @@ export function Dashboard() {
 
       <section className="panel dashboard-section" data-admin-section="leads">
         <div className="section-heading">
-          <p className="eyebrow">Estimate Queue</p>
-          <h2>New leads and scheduled estimate requests</h2>
+          <p className="eyebrow">Needs Quote</p>
+          <h2>Only open leads that still need pricing stay in the quote queue.</h2>
         </div>
         <div className="stack">
-          {estimateOptions.map((estimate) => (
+          {pendingQuoteLeads.map((estimate) => (
             <article key={estimate.id} className="list-card">
               <div>
                 <h3>{estimate.customerName}</h3>
@@ -1413,46 +1835,163 @@ export function Dashboard() {
               </div>
             </article>
           ))}
+          {!pendingQuoteLeads.length ? (
+            <p className="empty-state">No leads are waiting on a quote right now.</p>
+          ) : null}
+        </div>
+      </section>
+
+      <section className="panel dashboard-section" data-admin-section="leads">
+        <div className="section-heading">
+          <p className="eyebrow">Schedule Estimate</p>
+          <h2>Choose the actual estimate date and time, then email it to the customer.</h2>
+        </div>
+        {scheduleFeedback ? <div className="notice success">{scheduleFeedback}</div> : null}
+        {scheduleError ? <div className="notice">{scheduleError}</div> : null}
+        <form className="form-grid" onSubmit={handleScheduleEstimate}>
+          <label className="full-width">
+            Lead to schedule
+            <select
+              value={scheduleEstimateId}
+              onChange={(event) => setScheduleEstimateId(event.target.value)}
+              required
+            >
+              <option value="">Choose a lead</option>
+              {estimateOptions
+                .filter((estimate) =>
+                  ["new lead", "estimate completed", "estimate scheduled"].includes(estimate.status)
+                )
+                .map((estimate) => (
+                  <option key={estimate.id} value={estimate.id}>
+                    {estimate.customerName} - {estimate.jobType}
+                  </option>
+                ))}
+            </select>
+          </label>
+          <label>
+            Estimate date
+            <input
+              type="date"
+              value={scheduleDate}
+              onChange={(event) => setScheduleDate(event.target.value)}
+              required
+            />
+          </label>
+          <label>
+            Estimate time
+            <input
+              type="time"
+              value={scheduleTime}
+              onChange={(event) => setScheduleTime(event.target.value)}
+              required
+            />
+          </label>
+          <label className="full-width">
+            Customer note
+            <textarea
+              rows={3}
+              value={scheduleNote}
+              onChange={(event) => setScheduleNote(event.target.value)}
+              placeholder="Anything helpful the customer should know before the visit."
+            />
+          </label>
+          <div className="full-width form-actions">
+            <button type="submit" className="button-primary" disabled={isSendingSchedule}>
+              {isSendingSchedule ? "Sending Estimate Time..." : "Send Estimate Time"}
+            </button>
+          </div>
+        </form>
+      </section>
+
+      <section className="panel dashboard-section" data-admin-section="leads">
+        <div className="section-heading">
+          <p className="eyebrow">Quoted Lead History</p>
+          <h2>Once a quote exists, the lead moves out of the quote queue and stays here for reference.</h2>
+        </div>
+        <div className="stack">
+          {quotedLeadHistory.map((estimate) => (
+            <article key={estimate.id} className="list-card">
+              <div>
+                <h3>{estimate.customerName}</h3>
+                <p>{estimate.jobType}</p>
+                <small>{estimate.preferredSlot}</small>
+              </div>
+              <span className="pill">{estimate.status}</span>
+            </article>
+          ))}
+          {!quotedLeadHistory.length ? (
+            <p className="empty-state">Quoted leads will show up here after a quote is created.</p>
+          ) : null}
         </div>
       </section>
 
       <section className="panel dashboard-section" data-admin-section="leads" id="quote-calculator">
         <div className="section-heading">
           <p className="eyebrow">Quote Calculator</p>
-          <h2>Start with a lead, price the work, and turn it into a job later.</h2>
+          <h2>Create a quote from an active lead or add new work for an existing customer.</h2>
         </div>
         <form className="form-grid" onSubmit={handleCreateQuote}>
-          <label className="full-width">
-            Estimate request
+          <label>
+            Quote source
             <select
-              value={selectedEstimateId}
-              onChange={(event) => setSelectedEstimateId(event.target.value)}
-              required
+              value={quoteSourceMode}
+              onChange={(event) => setQuoteSourceMode(event.target.value as "lead" | "customer")}
             >
-              <option value="">Choose a lead</option>
-              {quoteEstimateOptions.map((estimate) => (
-                <option key={estimate.id} value={estimate.id}>
-                  {estimate.customerName} - {estimate.jobType}
-                </option>
-              ))}
+              <option value="lead">Active Lead</option>
+              <option value="customer">Existing Customer</option>
             </select>
           </label>
+          {quoteSourceMode === "lead" ? (
+            <label className="full-width">
+              Estimate request
+              <select
+                value={selectedEstimateId}
+                onChange={(event) => setSelectedEstimateId(event.target.value)}
+                required
+              >
+                <option value="">Choose a lead</option>
+                {quoteEstimateOptions.map((estimate) => (
+                  <option key={estimate.id} value={estimate.id}>
+                    {estimate.customerName} - {estimate.jobType}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : (
+            <label className="full-width">
+              Existing customer
+              <select
+                value={selectedCustomerId}
+                onChange={(event) => setSelectedCustomerId(event.target.value)}
+                required
+              >
+                <option value="">Choose a customer</option>
+                {quoteCustomers.map((customer) => (
+                  <option key={customer.id} value={customer.id}>
+                    {customer.fullName}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
           <label className="full-width">
             Quote title
             <input
               value={quoteTitle}
               onChange={(event) => setQuoteTitle(event.target.value)}
-              placeholder="Auto-filled from job type"
+              placeholder={
+                quoteSourceMode === "lead" ? "Auto-filled from job type" : "Example: Add-on cleanup work"
+              }
             />
           </label>
           <label className="full-width">
             Scope of work
             <textarea
               rows={4}
-              value={
-                data?.estimateRequests.find((item) => item.id === selectedEstimateId)?.description ?? ""
-              }
-              readOnly
+              value={quoteScope}
+              onChange={(event) => setQuoteScope(event.target.value)}
+              readOnly={quoteSourceMode === "lead"}
+              placeholder="List what is included in this quote."
             />
           </label>
           <div className="full-width labor-calculator">
