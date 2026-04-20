@@ -89,8 +89,24 @@ const timeCategoryLabels: Record<TimeCategory, string> = {
   other: "Other"
 };
 
+const timeCategoryColors: Record<TimeCategory, string> = {
+  on_site_work: "#8dea10",
+  travel: "#d88b2c",
+  loading_trailer: "#5f7cf7",
+  dump_run: "#a25ee8",
+  getting_materials: "#2ba59b",
+  fuel_stop: "#d15858",
+  equipment_maintenance: "#5e6c79",
+  estimate_appointment: "#c1a32a",
+  admin_office: "#7c5c48",
+  other: "#6a9150"
+};
+
 export function Dashboard() {
   const expenseReceiptInputRef = useRef<HTMLInputElement | null>(null);
+  const quoteFormRef = useRef<HTMLFormElement | null>(null);
+  const scheduleFormRef = useRef<HTMLFormElement | null>(null);
+  const timeClockFormRef = useRef<HTMLFormElement | null>(null);
   const lastScrollYRef = useRef(0);
   const [data, setData] = useState<AppData | null>(null);
   const [activeSection, setActiveSection] = useState<AdminSection>("home");
@@ -150,6 +166,8 @@ export function Dashboard() {
   const [timeEntryJobId, setTimeEntryJobId] = useState("");
   const [timeFilter, setTimeFilter] = useState<"week" | "month" | "all">("week");
   const [timeCategoryFilter, setTimeCategoryFilter] = useState<TimeCategory | "all">("all");
+  const [timeReportScope, setTimeReportScope] = useState<"all_jobs" | "single_job">("all_jobs");
+  const [selectedReportJobId, setSelectedReportJobId] = useState("");
   const [timerTick, setTimerTick] = useState(Date.now());
 
   useEffect(() => {
@@ -422,6 +440,124 @@ export function Dashboard() {
       return true;
     });
   }, [data, timeCategoryFilter, timeFilter]);
+
+  const timeEntryJobOptions = useMemo(() => {
+    if (!data) {
+      return [];
+    }
+
+    if (!timeEntryCustomerId) {
+      return data.jobs;
+    }
+
+    return data.jobs.filter((job) => job.customerId === timeEntryCustomerId);
+  }, [data, timeEntryCustomerId]);
+
+  useEffect(() => {
+    if (!timeEntryJobId) {
+      return;
+    }
+
+    const jobStillAvailable = timeEntryJobOptions.some((job) => job.id === timeEntryJobId);
+    if (!jobStillAvailable) {
+      setTimeEntryJobId("");
+    }
+  }, [timeEntryJobId, timeEntryJobOptions]);
+
+  const reportJobOptions = useMemo(() => {
+    const jobs = new Map<string, { id: string; title: string; customerName: string }>();
+
+    filteredTimeEntries.forEach((entry) => {
+      const jobId = entry.jobId || "__unlinked";
+      const job = entry.jobId ? data?.jobs.find((item) => item.id === entry.jobId) : undefined;
+      const customer = entry.customerId ? data?.customers.find((item) => item.id === entry.customerId) : undefined;
+
+      jobs.set(jobId, {
+        id: jobId,
+        title: job?.title || "General / Unlinked Time",
+        customerName: customer?.fullName || ""
+      });
+    });
+
+    return Array.from(jobs.values());
+  }, [data, filteredTimeEntries]);
+
+  useEffect(() => {
+    if (!reportJobOptions.length) {
+      setSelectedReportJobId("");
+      return;
+    }
+
+    const jobStillAvailable = reportJobOptions.some((job) => job.id === selectedReportJobId);
+    if (!selectedReportJobId || !jobStillAvailable) {
+      setSelectedReportJobId(reportJobOptions[0]?.id ?? "");
+    }
+  }, [reportJobOptions, selectedReportJobId]);
+
+  const jobComparisonRows = useMemo(() => {
+    const rows = new Map<
+      string,
+      {
+        id: string;
+        title: string;
+        customerName: string;
+        totalMinutes: number;
+        categoryMinutes: Partial<Record<TimeCategory, number>>;
+      }
+    >();
+
+    filteredTimeEntries.forEach((entry) => {
+      const rowId = entry.jobId || "__unlinked";
+      if (timeReportScope === "single_job" && selectedReportJobId && rowId !== selectedReportJobId) {
+        return;
+      }
+
+      const job = entry.jobId ? data?.jobs.find((item) => item.id === entry.jobId) : undefined;
+      const customer = entry.customerId ? data?.customers.find((item) => item.id === entry.customerId) : undefined;
+      const entryMinutes =
+        entry.isRunning && entry.startedAt
+          ? Math.max(1, Math.round((timerTick - new Date(entry.startedAt).getTime()) / 60000))
+          : entry.minutes;
+
+      const existingRow = rows.get(rowId) ?? {
+        id: rowId,
+        title: job?.title || "General / Unlinked Time",
+        customerName: customer?.fullName || "",
+        totalMinutes: 0,
+        categoryMinutes: {}
+      };
+
+      existingRow.totalMinutes += entryMinutes;
+      existingRow.categoryMinutes[entry.category] =
+        (existingRow.categoryMinutes[entry.category] ?? 0) + entryMinutes;
+      rows.set(rowId, existingRow);
+    });
+
+    return Array.from(rows.values()).sort((left, right) => right.totalMinutes - left.totalMinutes);
+  }, [data, filteredTimeEntries, selectedReportJobId, timeReportScope, timerTick]);
+
+  const reportCategories = useMemo(() => {
+    const categories = new Set<TimeCategory>();
+    jobComparisonRows.forEach((row) => {
+      Object.entries(row.categoryMinutes).forEach(([category, minutes]) => {
+        if (minutes && minutes > 0) {
+          categories.add(category as TimeCategory);
+        }
+      });
+    });
+
+    return Object.keys(timeCategoryLabels).filter((category) =>
+      categories.has(category as TimeCategory)
+    ) as TimeCategory[];
+  }, [jobComparisonRows]);
+
+  const maxJobCategoryMinutes = useMemo(() => {
+    const values = jobComparisonRows.flatMap((row) =>
+      reportCategories.map((category) => row.categoryMinutes[category] ?? 0)
+    );
+
+    return Math.max(1, ...values);
+  }, [jobComparisonRows, reportCategories]);
 
   const timeSummaryByCategory = useMemo(() => {
     const totals = new Map<TimeCategory, number>();
@@ -982,6 +1118,89 @@ export function Dashboard() {
   function chooseAdminSection(section: AdminSection) {
     setActiveSection(section);
     setIsMobileMenuOpen(false);
+  }
+
+  function scrollToElement(element: HTMLElement | null) {
+    if (!element) {
+      return;
+    }
+
+    window.setTimeout(() => {
+      element.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 80);
+  }
+
+  function startLeadQuote(estimateId: string) {
+    if (!data) {
+      return;
+    }
+
+    const estimate = data.estimateRequests.find((item) => item.id === estimateId);
+    if (!estimate) {
+      return;
+    }
+
+    setQuoteSourceMode("lead");
+    setSelectedEstimateId(estimateId);
+    setSelectedCustomerId("");
+    setQuoteTitle(estimate.jobType);
+    setQuoteScope(estimate.description);
+    setQuoteLines([starterLine]);
+    setLaborPeople("");
+    setLaborHours("");
+    setDepositMode("none");
+    setDepositAmount("");
+    setDepositPercent("");
+    setContractorSignature("Rooted Representative");
+    chooseAdminSection("leads");
+    scrollToElement(quoteFormRef.current);
+  }
+
+  function startCustomerQuote(customerId: string) {
+    if (!data) {
+      return;
+    }
+
+    const customer = data.customers.find((item) => item.id === customerId);
+    if (!customer) {
+      return;
+    }
+
+    setQuoteSourceMode("customer");
+    setSelectedCustomerId(customerId);
+    setSelectedEstimateId("");
+    setQuoteTitle(`Additional Work for ${customer.fullName}`);
+    setQuoteScope("");
+    setQuoteLines([starterLine]);
+    setLaborPeople("");
+    setLaborHours("");
+    setDepositMode("none");
+    setDepositAmount("");
+    setDepositPercent("");
+    setContractorSignature("Rooted Representative");
+    chooseAdminSection("leads");
+    scrollToElement(quoteFormRef.current);
+  }
+
+  function startEstimateSchedule(estimateId: string) {
+    setScheduleEstimateId(estimateId);
+    setScheduleDate(new Date().toISOString().slice(0, 10));
+    setScheduleTime("09:00");
+    setScheduleNote("");
+    setScheduleFeedback("");
+    setScheduleError("");
+    chooseAdminSection("leads");
+    scrollToElement(scheduleFormRef.current);
+  }
+
+  function startJobTimer(jobId: string, customerId: string) {
+    const job = data?.jobs.find((item) => item.id === jobId);
+    setTimeEntryCategory("on_site_work");
+    setTimeEntryCustomerId(customerId);
+    setTimeEntryJobId(jobId);
+    setTimeEntryNote(job ? `${job.title}` : "");
+    chooseAdminSection("time");
+    scrollToElement(timeClockFormRef.current);
   }
 
   const navItems: Array<{ id: AdminSection; label: string; count?: number }> = [
@@ -1612,7 +1831,7 @@ export function Dashboard() {
           </div>
         ) : null}
 
-        <form className="form-grid top-gap" onSubmit={handleStartTimeEntry}>
+        <form className="form-grid top-gap" onSubmit={handleStartTimeEntry} ref={timeClockFormRef}>
           <label>
             Category
             <select
@@ -1644,13 +1863,18 @@ export function Dashboard() {
             Job
             <select value={timeEntryJobId} onChange={(event) => setTimeEntryJobId(event.target.value)}>
               <option value="">No job linked</option>
-              {data.jobs.map((job) => (
+              {timeEntryJobOptions.map((job) => (
                 <option key={job.id} value={job.id}>
                   {job.title}
                 </option>
               ))}
             </select>
           </label>
+          {timeEntryCustomerId && !timeEntryJobOptions.length ? (
+            <p className="status-note full-width">
+              This customer does not have a job record yet. You can still track the time without linking a job.
+            </p>
+          ) : null}
           <label className="full-width">
             Note
             <input
@@ -1697,9 +1921,90 @@ export function Dashboard() {
           </select>
         </div>
 
+        <div className="inline-actions top-gap">
+          <select
+            value={timeReportScope}
+            onChange={(event) =>
+              setTimeReportScope(event.target.value as "all_jobs" | "single_job")
+            }
+          >
+            <option value="all_jobs">Compare All Jobs</option>
+            <option value="single_job">Single Job View</option>
+          </select>
+          {timeReportScope === "single_job" ? (
+            <select
+              value={selectedReportJobId}
+              onChange={(event) => setSelectedReportJobId(event.target.value)}
+            >
+              {reportJobOptions.map((job) => (
+                <option key={job.id} value={job.id}>
+                  {job.title}
+                </option>
+              ))}
+            </select>
+          ) : null}
+        </div>
+
+        <div className="stack top-gap">
+          <div className="section-heading compact-heading">
+            <p className="eyebrow">Job Time Graph</p>
+            <h2>
+              {timeReportScope === "single_job"
+                ? "See where the hours went on one job."
+                : "Compare jobs side by side by category."}
+            </h2>
+          </div>
+          {jobComparisonRows.map((row) => (
+            <article key={row.id} className="list-card chart-card">
+              <div className="card-copy">
+                <div className="task-title-row">
+                  <h3>{row.title}</h3>
+                  <span className="pill">{formatMinutes(row.totalMinutes)}</span>
+                </div>
+                {row.customerName ? <p>{row.customerName}</p> : null}
+                <div className="time-job-chart">
+                  {reportCategories.map((category) => {
+                    const minutes = row.categoryMinutes[category] ?? 0;
+                    if (!minutes) {
+                      return null;
+                    }
+
+                    return (
+                      <div key={`${row.id}-${category}`} className="time-job-chart-row">
+                        <div className="time-job-chart-label">
+                          <span
+                            className="time-job-chart-dot"
+                            style={{ backgroundColor: timeCategoryColors[category] }}
+                          />
+                          <span>{timeCategoryLabels[category]}</span>
+                        </div>
+                        <div className="time-job-chart-track">
+                          <div
+                            className="time-job-chart-fill"
+                            style={{
+                              width: `${Math.max(8, (minutes / maxJobCategoryMinutes) * 100)}%`,
+                              backgroundColor: timeCategoryColors[category]
+                            }}
+                          />
+                        </div>
+                        <span className="time-job-chart-value">{formatMinutes(minutes)}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </article>
+          ))}
+          {!jobComparisonRows.length ? (
+            <p className="empty-state">Track time on a few jobs to unlock the job comparison graph.</p>
+          ) : null}
+        </div>
+
         <div className="stack top-gap">
           {timeSummaryByCategory.map((entry) => {
             const maxMinutes = timeSummaryByCategory[0]?.minutes ?? 1;
+            const totalMinutes = timeSummaryByCategory.reduce((sum, item) => sum + item.minutes, 0);
+            const percentOfTime = totalMinutes ? Math.round((entry.minutes / totalMinutes) * 100) : 0;
             return (
               <article key={entry.category} className="list-card">
                 <div className="card-copy">
@@ -1710,6 +2015,7 @@ export function Dashboard() {
                       style={{ width: `${Math.max(8, (entry.minutes / maxMinutes) * 100)}%` }}
                     />
                   </div>
+                  <p className="status-note">{percentOfTime}% of tracked time in this view</p>
                 </div>
                 <span className="pill">{formatMinutes(entry.minutes)}</span>
               </article>
@@ -1782,15 +2088,26 @@ export function Dashboard() {
         </div>
         <div className="stack">
           {activeCustomers.map((customer) => (
-            <article key={customer.id} className="list-card">
-              <div>
+            <article key={customer.id} className="list-card split-card action-card">
+              <div className="card-copy">
                 <h3>{customer.fullName}</h3>
                 <p>
                   {customer.phone} • {customer.email}
                 </p>
                 <small>{customer.address}</small>
               </div>
-              <span className="pill">{customer.preferredContact}</span>
+              <div className="action-stack">
+                <span className="pill">{customer.preferredContact}</span>
+                <div className="action-row">
+                  <button
+                    type="button"
+                    className="button-primary"
+                    onClick={() => startCustomerQuote(customer.id)}
+                  >
+                    New Quote
+                  </button>
+                </div>
+              </div>
             </article>
           ))}
           {!activeCustomers.length ? (
@@ -1806,15 +2123,26 @@ export function Dashboard() {
         </div>
         <div className="stack">
           {archivedCustomers.map((customer) => (
-            <article key={customer.id} className="list-card">
-              <div>
+            <article key={customer.id} className="list-card split-card action-card">
+              <div className="card-copy">
                 <h3>{customer.fullName}</h3>
                 <p>
                   {customer.phone} • {customer.email}
                 </p>
                 <small>{customer.address}</small>
               </div>
-              <span className="pill">archived</span>
+              <div className="action-stack">
+                <span className="pill">archived</span>
+                <div className="action-row">
+                  <button
+                    type="button"
+                    className="button-secondary"
+                    onClick={() => startCustomerQuote(customer.id)}
+                  >
+                    Add Work Quote
+                  </button>
+                </div>
+              </div>
             </article>
           ))}
           {!archivedCustomers.length ? (
@@ -1830,8 +2158,8 @@ export function Dashboard() {
         </div>
         <div className="stack">
           {pendingQuoteLeads.map((estimate) => (
-            <article key={estimate.id} className="list-card">
-              <div>
+            <article key={estimate.id} className="list-card split-card action-card">
+              <div className="card-copy">
                 <h3>{estimate.customerName}</h3>
                 <p>{estimate.jobType}</p>
                 <small>
@@ -1846,6 +2174,22 @@ export function Dashboard() {
                   <span className="pill accent-pill">repeat customer</span>
                 ) : null}
                 <span className="pill">{estimate.status}</span>
+                <div className="action-row">
+                  <button
+                    type="button"
+                    className="button-secondary"
+                    onClick={() => startEstimateSchedule(estimate.id)}
+                  >
+                    Schedule
+                  </button>
+                  <button
+                    type="button"
+                    className="button-primary"
+                    onClick={() => startLeadQuote(estimate.id)}
+                  >
+                    Quote
+                  </button>
+                </div>
               </div>
             </article>
           ))}
@@ -1862,7 +2206,7 @@ export function Dashboard() {
         </div>
         {scheduleFeedback ? <div className="notice success">{scheduleFeedback}</div> : null}
         {scheduleError ? <div className="notice">{scheduleError}</div> : null}
-        <form className="form-grid" onSubmit={handleScheduleEstimate}>
+        <form className="form-grid" onSubmit={handleScheduleEstimate} ref={scheduleFormRef}>
           <label className="full-width">
             Lead to schedule
             <select
@@ -1963,7 +2307,7 @@ export function Dashboard() {
           <p className="eyebrow">Quote Calculator</p>
           <h2>Create a quote from an active lead or add new work for an existing customer.</h2>
         </div>
-        <form className="form-grid" onSubmit={handleCreateQuote}>
+        <form className="form-grid" onSubmit={handleCreateQuote} ref={quoteFormRef}>
           <label>
             Quote source
             <select
@@ -2259,6 +2603,15 @@ export function Dashboard() {
                         onClick={() => printQuotePdf(quote, customer)}
                       >
                         Quote PDF
+                      </button>
+                    ) : null}
+                    {job.status !== "completed" ? (
+                      <button
+                        type="button"
+                        className="button-secondary"
+                        onClick={() => startJobTimer(job.id, job.customerId)}
+                      >
+                        Start Timer
                       </button>
                     ) : null}
                     {job.status !== "completed" ? (

@@ -24,6 +24,7 @@ import {
 } from "@/lib/types";
 
 const STORAGE_KEY = "rooted-estimates-data";
+const TIME_ENTRY_RESET_KEY = "rooted-time-entry-reset-2026-04-20";
 
 function canUseStorage() {
   return typeof window !== "undefined" && typeof window.localStorage !== "undefined";
@@ -148,6 +149,12 @@ export function loadAppData(): AppData {
   try {
     const parsed = JSON.parse(raw) as Partial<AppData>;
     const normalized = normalizeData(parsed);
+
+    if (!window.localStorage.getItem(TIME_ENTRY_RESET_KEY)) {
+      normalized.timeEntries = [];
+      window.localStorage.setItem(TIME_ENTRY_RESET_KEY, "done");
+    }
+
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(normalized));
     return normalized;
   } catch {

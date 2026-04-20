@@ -788,6 +788,7 @@ button.text-link {
 .admin-content[data-active-section="leads"] .dashboard-section[data-admin-section="leads"],
 .admin-content[data-active-section="jobs"] .dashboard-section[data-admin-section="jobs"],
 .admin-content[data-active-section="tasks"] .dashboard-section[data-admin-section="tasks"],
+.admin-content[data-active-section="time"] .dashboard-section[data-admin-section="time"],
 .admin-content[data-active-section="customers"] .dashboard-section[data-admin-section="customers"],
 .admin-content[data-active-section="invoices"] .dashboard-section[data-admin-section="invoices"],
 .admin-content[data-active-section="landing"] .dashboard-section[data-admin-section="landing"],
@@ -1156,6 +1157,60 @@ textarea {
   background: linear-gradient(90deg, rgba(141, 234, 16, 0.9), rgba(183, 255, 72, 0.95));
 }
 
+.chart-card {
+  border: 1px solid rgba(16, 17, 15, 0.08);
+}
+
+.time-job-chart {
+  display: grid;
+  gap: 0.7rem;
+  margin-top: 0.85rem;
+}
+
+.time-job-chart-row {
+  display: grid;
+  grid-template-columns: minmax(150px, 180px) minmax(0, 1fr) auto;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.time-job-chart-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-family: "Trebuchet MS", Helvetica, sans-serif;
+  font-size: 0.9rem;
+  color: var(--ink);
+}
+
+.time-job-chart-dot {
+  width: 0.7rem;
+  height: 0.7rem;
+  border-radius: 999px;
+  flex: 0 0 auto;
+}
+
+.time-job-chart-track {
+  width: 100%;
+  height: 0.9rem;
+  border-radius: 999px;
+  background: rgba(16, 17, 15, 0.08);
+  overflow: hidden;
+}
+
+.time-job-chart-fill {
+  height: 100%;
+  border-radius: 999px;
+}
+
+.time-job-chart-value {
+  min-width: 3.5rem;
+  text-align: right;
+  font-family: "Trebuchet MS", Helvetica, sans-serif;
+  font-size: 0.88rem;
+  color: var(--muted);
+}
+
 .invoice-meta-grid {
   display: grid;
   gap: 0.3rem;
@@ -1322,6 +1377,15 @@ textarea {
   .summary-step-cta {
     justify-self: start;
     margin-top: 0.15rem;
+  }
+
+  .time-job-chart-row {
+    grid-template-columns: 1fr;
+    gap: 0.4rem;
+  }
+
+  .time-job-chart-value {
+    text-align: left;
   }
 
   .landing-footer {
