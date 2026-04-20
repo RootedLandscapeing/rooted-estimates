@@ -706,6 +706,7 @@ export function Dashboard() {
         body: JSON.stringify({
           customerName: customer.fullName,
           customerEmail: customer.email,
+          serviceAddress: estimate.serviceAddress,
           estimateDate: scheduleDate,
           estimateTime: scheduleTime,
           projectTitle: estimate.jobType,

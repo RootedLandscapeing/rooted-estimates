@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 type ScheduleEstimatePayload = {
   customerName: string;
   customerEmail: string;
+  serviceAddress: string;
   estimateDate: string;
   estimateTime: string;
   projectTitle: string;
@@ -25,18 +26,23 @@ function buildDateTimeLabel(estimateDate: string, estimateTime: string) {
   };
 }
 
+const rootedContactEmail =
+  process.env.ESTIMATE_NOTIFICATION_EMAIL ?? "rootedlandscape1@gmail.com";
+const rootedContactPhone = "(702) 419-9636";
+const rootedLogoUrl = "https://rootedlandscapingmoapavalley.com/rooted-logo.png";
+
 function buildScheduleEmailText(payload: ScheduleEstimatePayload) {
   const formatted = buildDateTimeLabel(payload.estimateDate, payload.estimateTime);
 
   return [
     `Hi ${payload.customerName},`,
     "",
-    `Rooted Moapa Valley Landscaping has scheduled your estimate for ${formatted.longDate} at ${formatted.time}.`,
+    `Rooted Moapa Valley Landscaping has scheduled your estimate for ${formatted.longDate} at ${formatted.time}. We will meet you at ${payload.serviceAddress}.`,
     "",
     `Project: ${payload.projectTitle}`,
     payload.note?.trim() ? `Note from Rooted: ${payload.note.trim()}` : "",
     "",
-    "If you need to make a change, please reply to this email or contact Rooted directly.",
+    `If you need to reschedule the quote, please contact Rooted at ${rootedContactPhone}.`,
     "",
     "Thank you,",
     "Rooted Moapa Valley Landscaping"
@@ -50,11 +56,17 @@ function buildScheduleEmailHtml(payload: ScheduleEstimatePayload) {
 
   return `
     <div style="font-family: Arial, sans-serif; color: #181f0e; line-height: 1.5;">
+      <img
+        src="${rootedLogoUrl}"
+        alt="Rooted Moapa Valley Landscaping"
+        style="display:block; max-width: 180px; height:auto; margin: 0 0 18px;"
+      />
       <h1 style="margin: 0 0 12px;">Your estimate has been scheduled</h1>
       <p style="margin: 0 0 18px;">Hi ${payload.customerName},</p>
       <p style="margin: 0 0 14px;">
         Rooted Moapa Valley Landscaping has scheduled your estimate for
         <strong>${formatted.longDate}</strong> at <strong>${formatted.time}</strong>.
+        We will meet you at <strong>${payload.serviceAddress}</strong>.
       </p>
       <p style="margin: 0 0 12px;"><strong>Project:</strong> ${payload.projectTitle}</p>
       ${
@@ -63,7 +75,8 @@ function buildScheduleEmailHtml(payload: ScheduleEstimatePayload) {
           : ""
       }
       <p style="margin: 0;">
-        If you need to make a change, please reply to this email or contact Rooted directly.
+        If you need to reschedule the quote, please contact Rooted at
+        <a href="tel:+17024199636">${rootedContactPhone}</a>.
       </p>
     </div>
   `;
@@ -79,6 +92,7 @@ export async function POST(request: Request) {
   if (
     !payload.customerName ||
     !payload.customerEmail ||
+    !payload.serviceAddress ||
     !payload.estimateDate ||
     !payload.estimateTime ||
     !payload.projectTitle
@@ -93,8 +107,9 @@ export async function POST(request: Request) {
       "Content-Type": "application/json"
     },
     body: JSON.stringify({
-      from: "Rooted Website <notifications@rootedlandscapingmoapavalley.com>",
+      from: "Rooted Moapa Valley Landscaping <notifications@rootedlandscapingmoapavalley.com>",
       to: payload.customerEmail,
+      reply_to: rootedContactEmail,
       subject: `Your estimate is scheduled: ${payload.projectTitle}`,
       text: buildScheduleEmailText(payload),
       html: buildScheduleEmailHtml(payload)
