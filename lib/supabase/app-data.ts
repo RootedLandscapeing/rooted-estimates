@@ -14,7 +14,8 @@ import {
   Payment,
   Quote,
   SiteContent,
-  Task
+  Task,
+  TimeEntry
 } from "@/lib/types";
 
 type JsonArray<T> = T[];
@@ -54,6 +55,20 @@ type TaskRow = {
   related_job_id: string | null;
   related_quote_id: string | null;
   related_invoice_id: string | null;
+  created_at: string;
+};
+
+type TimeEntryRow = {
+  id: string;
+  entry_date: string;
+  category: TimeEntry["category"];
+  note: string;
+  customer_id: string | null;
+  job_id: string | null;
+  started_at: string | null;
+  ended_at: string | null;
+  minutes: number;
+  is_running: boolean;
   created_at: string;
 };
 
@@ -227,6 +242,22 @@ function mapTask(row: TaskRow): Task {
   };
 }
 
+function mapTimeEntry(row: TimeEntryRow): TimeEntry {
+  return {
+    id: row.id,
+    entryDate: row.entry_date,
+    category: row.category,
+    note: row.note,
+    customerId: row.customer_id ?? undefined,
+    jobId: row.job_id ?? undefined,
+    startedAt: row.started_at ?? undefined,
+    endedAt: row.ended_at ?? undefined,
+    minutes: Number(row.minutes),
+    isRunning: row.is_running,
+    createdAt: toDateOnly(row.created_at)
+  };
+}
+
 function mapQuote(row: QuoteRow): Quote {
   return {
     id: row.id,
@@ -389,6 +420,7 @@ export async function loadSupabaseAppData(fallbackData = defaultData): Promise<A
     customersResult,
     estimatesResult,
     tasksResult,
+    timeEntriesResult,
     quotesResult,
     jobsResult,
     invoicesResult,
@@ -400,6 +432,7 @@ export async function loadSupabaseAppData(fallbackData = defaultData): Promise<A
     supabase.from("customers").select("*").order("created_at", { ascending: false }),
     supabase.from("estimate_requests").select("*").order("created_at", { ascending: false }),
     supabase.from("tasks").select("*").order("created_at", { ascending: false }),
+    supabase.from("time_entries").select("*").order("created_at", { ascending: false }),
     supabase.from("quotes").select("*").order("created_at", { ascending: false }),
     supabase.from("jobs").select("*"),
     supabase.from("invoices").select("*").order("created_at", { ascending: false }),
@@ -413,6 +446,7 @@ export async function loadSupabaseAppData(fallbackData = defaultData): Promise<A
     customersResult.error ??
     estimatesResult.error ??
     tasksResult.error ??
+    timeEntriesResult.error ??
     quotesResult.error ??
     jobsResult.error ??
     invoicesResult.error ??
@@ -433,6 +467,7 @@ export async function loadSupabaseAppData(fallbackData = defaultData): Promise<A
     customers: ((customersResult.data ?? []) as CustomerRow[]).map(mapCustomer),
     estimateRequests: ((estimatesResult.data ?? []) as EstimateRequestRow[]).map(mapEstimateRequest),
     tasks: ((tasksResult.data ?? []) as TaskRow[]).map(mapTask),
+    timeEntries: ((timeEntriesResult.data ?? []) as TimeEntryRow[]).map(mapTimeEntry),
     quotes: ((quotesResult.data ?? []) as QuoteRow[]).map(mapQuote),
     jobs: ((jobsResult.data ?? []) as JobRow[]).map(mapJob),
     invoices: ((invoicesResult.data ?? []) as InvoiceRow[]).map(mapInvoice),
@@ -627,9 +662,24 @@ export async function saveSupabaseAppData(data: AppData) {
     }))
   );
 
+  const timeEntries = data.timeEntries.map((entry): TimeEntryRow => ({
+    id: entry.id,
+    entry_date: entry.entryDate,
+    category: entry.category,
+    note: entry.note,
+    customer_id: entry.customerId ?? null,
+    job_id: entry.jobId ?? null,
+    started_at: entry.startedAt ?? null,
+    ended_at: entry.endedAt ?? null,
+    minutes: entry.minutes,
+    is_running: entry.isRunning,
+    created_at: entry.createdAt
+  }));
+
   const operations = [
     customers.length ? supabase.from("customers").upsert(customers) : null,
     estimateRequests.length ? supabase.from("estimate_requests").upsert(estimateRequests) : null,
+    timeEntries.length ? supabase.from("time_entries").upsert(timeEntries) : null,
     quotes.length ? supabase.from("quotes").upsert(quotes) : null,
     jobs.length ? supabase.from("jobs").upsert(jobs) : null,
     invoices.length ? supabase.from("invoices").upsert(invoices) : null,
