@@ -52,16 +52,19 @@ const starterLine: QuoteLineItem = {
 const LABOR_RATE_PER_PERSON_HOUR = 75;
 
 const LABOR_ACTION_OPTIONS = [
-  "Loading trailer",
-  "Travel",
-  "On-site cleanup",
+  "Trimming trees",
+  "Mowing grass",
+  "Edging and blowing",
+  "General cleanup",
   "Tree trimming",
   "Weed removal",
   "Rock work",
   "Irrigation repair",
+  "Planting",
+  "Shrub trimming",
+  "Yard cleanup",
   "Material pickup",
   "Dump run",
-  "Estimate appointment",
   "Custom action"
 ] as const;
 
@@ -76,7 +79,7 @@ type LaborEntry = {
 function createLaborEntry(idSuffix: string): LaborEntry {
   return {
     id: `labor-${idSuffix}`,
-    action: "On-site cleanup",
+    action: "General cleanup",
     customAction: "",
     people: "",
     hours: ""
@@ -802,6 +805,7 @@ export function Dashboard() {
       const people = Number(entry.people || 0);
       const hours = Number(entry.hours || 0);
       const amount = people * hours * LABOR_RATE_PER_PERSON_HOUR;
+      const crewRate = people * LABOR_RATE_PER_PERSON_HOUR;
       const actionLabel =
         entry.action === "Custom action" ? entry.customAction.trim() : entry.action;
 
@@ -812,9 +816,9 @@ export function Dashboard() {
       return [
         {
           id: `line-labor-${Date.now()}-${index}`,
-          description: `${actionLabel} labor (${people} ${people === 1 ? "person" : "people"} x ${hours} ${hours === 1 ? "hour" : "hours"} @ $${LABOR_RATE_PER_PERSON_HOUR}/hr)`,
-          qty: people * hours,
-          unitPrice: LABOR_RATE_PER_PERSON_HOUR,
+          description: `${actionLabel}${people > 1 ? ` (${people}-person crew)` : ""}`,
+          qty: hours,
+          unitPrice: crewRate,
           amount
         }
       ];
@@ -2497,6 +2501,13 @@ export function Dashboard() {
                     </label>
                   ) : null}
                   <div className="inline-actions top-gap">
+                    <span className="status-note">
+                      Saves as {Number(entry.hours || 0) || 0} hr at $
+                      {(Number(entry.people || 0) * LABOR_RATE_PER_PERSON_HOUR).toFixed(2)}/hr
+                      {Number(entry.people || 0) > 1
+                        ? ` (${Number(entry.people || 0)}-person crew)`
+                        : ""}
+                    </span>
                     <span className="status-note">
                       Action total: $
                       {(
