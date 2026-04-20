@@ -1066,9 +1066,18 @@ textarea {
 
 .labor-input-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr)) minmax(150px, 0.75fr);
+  grid-template-columns: minmax(0, 1.4fr) repeat(2, minmax(120px, 0.7fr));
   gap: 0.85rem;
   align-items: end;
+}
+
+.labor-entry-card {
+  display: grid;
+  gap: 0.75rem;
+  padding: 0.9rem;
+  border-radius: 16px;
+  border: 1px solid rgba(16, 17, 15, 0.08);
+  background: rgba(255, 255, 255, 0.48);
 }
 
 .labor-total-card {

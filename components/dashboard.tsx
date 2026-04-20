@@ -51,6 +51,38 @@ const starterLine: QuoteLineItem = {
 
 const LABOR_RATE_PER_PERSON_HOUR = 75;
 
+const LABOR_ACTION_OPTIONS = [
+  "Loading trailer",
+  "Travel",
+  "On-site cleanup",
+  "Tree trimming",
+  "Weed removal",
+  "Rock work",
+  "Irrigation repair",
+  "Material pickup",
+  "Dump run",
+  "Estimate appointment",
+  "Custom action"
+] as const;
+
+type LaborEntry = {
+  id: string;
+  action: (typeof LABOR_ACTION_OPTIONS)[number];
+  customAction: string;
+  people: string;
+  hours: string;
+};
+
+function createLaborEntry(idSuffix: string): LaborEntry {
+  return {
+    id: `labor-${idSuffix}`,
+    action: "On-site cleanup",
+    customAction: "",
+    people: "",
+    hours: ""
+  };
+}
+
 type AdminSection =
   | "home"
   | "leads"
@@ -118,8 +150,7 @@ export function Dashboard() {
   const [quoteTitle, setQuoteTitle] = useState("");
   const [quoteScope, setQuoteScope] = useState("");
   const [quoteLines, setQuoteLines] = useState<QuoteLineItem[]>([starterLine]);
-  const [laborPeople, setLaborPeople] = useState("");
-  const [laborHours, setLaborHours] = useState("");
+  const [laborEntries, setLaborEntries] = useState<LaborEntry[]>([createLaborEntry("1")]);
   const [depositMode, setDepositMode] = useState<"none" | "amount" | "percent">("none");
   const [depositAmount, setDepositAmount] = useState("");
   const [depositPercent, setDepositPercent] = useState("");
@@ -396,6 +427,16 @@ export function Dashboard() {
       all: data?.tasks ?? []
     };
   }, [data]);
+
+  const laborTotal = useMemo(
+    () =>
+      laborEntries.reduce((sum, entry) => {
+        const people = Number(entry.people || 0);
+        const hours = Number(entry.hours || 0);
+        return sum + people * hours * LABOR_RATE_PER_PERSON_HOUR;
+      }, 0),
+    [laborEntries]
+  );
 
   const visibleTasks = taskBuckets[taskView];
 
@@ -716,6 +757,26 @@ export function Dashboard() {
     ]);
   }
 
+  function updateLaborEntry(id: string, updates: Partial<LaborEntry>) {
+    setLaborEntries((current) =>
+      current.map((entry) => (entry.id === id ? { ...entry, ...updates } : entry))
+    );
+  }
+
+  function addLaborEntry() {
+    setLaborEntries((current) => [...current, createLaborEntry(`${Date.now()}-${current.length + 1}`)]);
+  }
+
+  function removeLaborEntry(id: string) {
+    setLaborEntries((current) => {
+      if (current.length === 1) {
+        return [createLaborEntry("1")];
+      }
+
+      return current.filter((entry) => entry.id !== id);
+    });
+  }
+
   function handleCreateQuote(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!data) {
@@ -737,21 +798,29 @@ export function Dashboard() {
       return;
     }
 
-    const laborPersonCount = Number(laborPeople || 0);
-    const laborHourCount = Number(laborHours || 0);
-    const laborAmount = laborPersonCount * laborHourCount * LABOR_RATE_PER_PERSON_HOUR;
-    const laborLine =
-      laborAmount > 0
-        ? {
-            id: `line-labor-${Date.now()}`,
-            description: `Labor (${laborPersonCount} ${laborPersonCount === 1 ? "person" : "people"} x ${laborHourCount} ${laborHourCount === 1 ? "hour" : "hours"} @ $${LABOR_RATE_PER_PERSON_HOUR}/hr)`,
-            qty: laborPersonCount * laborHourCount,
-            unitPrice: LABOR_RATE_PER_PERSON_HOUR,
-            amount: laborAmount
-          }
-        : null;
+    const laborLines = laborEntries.flatMap((entry, index) => {
+      const people = Number(entry.people || 0);
+      const hours = Number(entry.hours || 0);
+      const amount = people * hours * LABOR_RATE_PER_PERSON_HOUR;
+      const actionLabel =
+        entry.action === "Custom action" ? entry.customAction.trim() : entry.action;
+
+      if (!actionLabel || !people || !hours || amount <= 0) {
+        return [];
+      }
+
+      return [
+        {
+          id: `line-labor-${Date.now()}-${index}`,
+          description: `${actionLabel} labor (${people} ${people === 1 ? "person" : "people"} x ${hours} ${hours === 1 ? "hour" : "hours"} @ $${LABOR_RATE_PER_PERSON_HOUR}/hr)`,
+          qty: people * hours,
+          unitPrice: LABOR_RATE_PER_PERSON_HOUR,
+          amount
+        }
+      ];
+    });
     const lineItems = [
-      ...(laborLine ? [laborLine] : []),
+      ...laborLines,
       ...quoteLines.filter((line) => line.description.trim().length > 0)
     ];
     if (!lineItems.length) {
@@ -797,8 +866,7 @@ export function Dashboard() {
     setSelectedEstimateId("");
     setSelectedCustomerId("");
     setQuoteLines([starterLine]);
-    setLaborPeople("");
-    setLaborHours("");
+    setLaborEntries([createLaborEntry("1")]);
     setDepositMode("none");
     setDepositAmount("");
     setDepositPercent("");
@@ -1146,8 +1214,7 @@ export function Dashboard() {
     setQuoteTitle(estimate.jobType);
     setQuoteScope(estimate.description);
     setQuoteLines([starterLine]);
-    setLaborPeople("");
-    setLaborHours("");
+    setLaborEntries([createLaborEntry("1")]);
     setDepositMode("none");
     setDepositAmount("");
     setDepositPercent("");
@@ -1172,8 +1239,7 @@ export function Dashboard() {
     setQuoteTitle(`Additional Work for ${customer.fullName}`);
     setQuoteScope("");
     setQuoteLines([starterLine]);
-    setLaborPeople("");
-    setLaborHours("");
+    setLaborEntries([createLaborEntry("1")]);
     setDepositMode("none");
     setDepositAmount("");
     setDepositPercent("");
@@ -2373,41 +2439,96 @@ export function Dashboard() {
           </label>
           <div className="full-width labor-calculator">
             <div className="section-heading compact-heading">
-              <p className="eyebrow">Labor Calculator</p>
+              <p className="eyebrow">Labor Builder</p>
               <h2>$75 per hour per person</h2>
             </div>
-            <div className="labor-input-grid">
-              <label>
-                Number of people
-                <input
-                  type="number"
-                  min="0"
-                  step="1"
-                  value={laborPeople}
-                  onChange={(event) => setLaborPeople(event.target.value)}
-                  placeholder="2"
-                />
-              </label>
-              <label>
-                Hours on job
-                <input
-                  type="number"
-                  min="0"
-                  step="0.25"
-                  value={laborHours}
-                  onChange={(event) => setLaborHours(event.target.value)}
-                  placeholder="1"
-                />
-              </label>
+            <div className="stack">
+              {laborEntries.map((entry, index) => (
+                <div key={entry.id} className="labor-entry-card">
+                  <div className="labor-input-grid">
+                    <label>
+                      Action
+                      <select
+                        value={entry.action}
+                        onChange={(event) =>
+                          updateLaborEntry(entry.id, { action: event.target.value as LaborEntry["action"] })
+                        }
+                      >
+                        {LABOR_ACTION_OPTIONS.map((option) => (
+                          <option key={option} value={option}>
+                            {option}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label>
+                      Number of people
+                      <input
+                        type="number"
+                        min="0"
+                        step="1"
+                        value={entry.people}
+                        onChange={(event) => updateLaborEntry(entry.id, { people: event.target.value })}
+                        placeholder="2"
+                      />
+                    </label>
+                    <label>
+                      Hours
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.25"
+                        value={entry.hours}
+                        onChange={(event) => updateLaborEntry(entry.id, { hours: event.target.value })}
+                        placeholder="1"
+                      />
+                    </label>
+                  </div>
+                  {entry.action === "Custom action" ? (
+                    <label className="full-width top-gap">
+                      Custom action
+                      <input
+                        value={entry.customAction}
+                        onChange={(event) =>
+                          updateLaborEntry(entry.id, { customAction: event.target.value })
+                        }
+                        placeholder="Example: Haul off extra debris"
+                      />
+                    </label>
+                  ) : null}
+                  <div className="inline-actions top-gap">
+                    <span className="status-note">
+                      Action total: $
+                      {(
+                        Number(entry.people || 0) *
+                        Number(entry.hours || 0) *
+                        LABOR_RATE_PER_PERSON_HOUR
+                      ).toFixed(2)}
+                    </span>
+                    {laborEntries.length > 1 ? (
+                      <button
+                        type="button"
+                        className="button-secondary"
+                        onClick={() => removeLaborEntry(entry.id)}
+                      >
+                        Remove
+                      </button>
+                    ) : null}
+                    {index === laborEntries.length - 1 ? (
+                      <button type="button" className="button-secondary" onClick={addLaborEntry}>
+                        Add Another Labor Line
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+              ))}
               <div className="labor-total-card">
                 <span>Labor total</span>
-                <strong>
-                  ${(Number(laborPeople || 0) * Number(laborHours || 0) * LABOR_RATE_PER_PERSON_HOUR).toFixed(2)}
-                </strong>
+                <strong>${laborTotal.toFixed(2)}</strong>
               </div>
             </div>
             <p className="status-note">
-              Labor is automatically added as a quote line when the quote is saved.
+              Each labor action is added to the quote as its own line when the quote is saved.
             </p>
           </div>
           <label>
