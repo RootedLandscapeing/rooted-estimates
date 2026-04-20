@@ -7,8 +7,7 @@ import {
   getFirstAvailableDay
 } from "@/lib/availability";
 import { loadSupabasePublicContent } from "@/lib/supabase/app-data";
-import { createSupabaseEstimateRequest } from "@/lib/supabase/estimate-requests";
-import { createEstimateLead, loadAppData, saveAppData } from "@/lib/storage";
+import { loadAppData } from "@/lib/storage";
 import { AvailabilitySlot } from "@/lib/types";
 
 const initialState = {
@@ -132,35 +131,37 @@ export function RequestForm() {
     setSubmitError("");
 
     try {
-      await createSupabaseEstimateRequest(form);
-      // The request is saved first; notification failures should not block the customer.
-      fetch("/api/estimate-notification", {
+      const response = await fetch("/api/estimate-request", {
         method: "POST",
         headers: {
           "Content-Type": "application/json"
         },
         body: JSON.stringify(form)
-      }).catch((error) => {
-        console.error(error);
       });
+
+      const result = (await response.json().catch(() => null)) as
+        | { error?: string; warning?: string; ok?: boolean; notified?: boolean }
+        | null;
+
+      if (!response.ok) {
+        setSubmitError(
+          result?.error ??
+            "Your request could not be sent right now. Please try again in a moment."
+        );
+        return;
+      }
+
       setSubmitted(true);
+      setSubmitError(result?.warning ?? "");
       setForm((current) => ({
         ...initialState,
         preferredSlot: current.preferredSlot
       }));
     } catch (error) {
       console.error(error);
-      const currentData = loadAppData();
-      const nextData = createEstimateLead(currentData, form);
-      saveAppData(nextData);
-      setSubmitted(true);
       setSubmitError(
-        "Your request was saved on this device, but the live dashboard sync needs to be checked."
+        "Your request could not be sent right now. Please check your connection and try again."
       );
-      setForm((current) => ({
-        ...initialState,
-        preferredSlot: current.preferredSlot
-      }));
     }
   }
 
