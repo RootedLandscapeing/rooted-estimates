@@ -293,6 +293,19 @@ export function Dashboard() {
     [data]
   );
 
+  const selectedScheduleEstimate = useMemo(
+    () => data?.estimateRequests.find((item) => item.id === scheduleEstimateId),
+    [data, scheduleEstimateId]
+  );
+
+  const selectedScheduleCustomer = useMemo(
+    () =>
+      selectedScheduleEstimate
+        ? data?.customers.find((item) => item.id === selectedScheduleEstimate.customerId)
+        : undefined,
+    [data, selectedScheduleEstimate]
+  );
+
   const pendingQuoteLeads = useMemo(
     () =>
       quoteEstimateOptions.filter((estimate) =>
@@ -1844,7 +1857,7 @@ export function Dashboard() {
       <section className="panel dashboard-section" data-admin-section="leads">
         <div className="section-heading">
           <p className="eyebrow">Schedule Estimate</p>
-          <h2>Choose the actual estimate date and time, then email it to the customer.</h2>
+          <h2>Choose any date and time that works, while still seeing what the customer originally asked for.</h2>
         </div>
         {scheduleFeedback ? <div className="notice success">{scheduleFeedback}</div> : null}
         {scheduleError ? <div className="notice">{scheduleError}</div> : null}
@@ -1868,6 +1881,25 @@ export function Dashboard() {
                 ))}
             </select>
           </label>
+          {selectedScheduleEstimate && selectedScheduleCustomer ? (
+            <div className="full-width labor-calculator">
+              <div className="section-heading compact-heading">
+                <p className="eyebrow">Customer Request Details</p>
+                <h2>{selectedScheduleCustomer.fullName}</h2>
+              </div>
+              <div className="timestamp-list">
+                <span>Preferred request: {selectedScheduleEstimate.preferredSlot}</span>
+                <span>Preferred contact: {selectedScheduleCustomer.preferredContact}</span>
+                <span>{selectedScheduleEstimate.serviceAddress}</span>
+              </div>
+              <p className="hero-card-copy top-gap">
+                {selectedScheduleEstimate.description}
+              </p>
+              {selectedScheduleCustomer.notes ? (
+                <p className="status-note">Customer notes: {selectedScheduleCustomer.notes}</p>
+              ) : null}
+            </div>
+          ) : null}
           <label>
             Estimate date
             <input

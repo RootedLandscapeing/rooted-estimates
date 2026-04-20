@@ -390,7 +390,7 @@ export function scheduleEstimate(
     ...data,
     estimateRequests: data.estimateRequests.map((request) =>
       request.id === estimate.id
-        ? { ...request, status: "estimate scheduled", preferredSlot: scheduledLabel }
+        ? { ...request, status: "estimate scheduled" }
         : request
     ),
     tasks: [scheduleTask, ...data.tasks]
