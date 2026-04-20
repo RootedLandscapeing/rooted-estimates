@@ -53,22 +53,22 @@ export function HomeContent() {
               <span className="step-number">1</span>
               <div>
                 <strong>Request an estimate</strong>
-                <p>Tell Rooted about the project, share photos if needed, and choose a time.</p>
+                <p>Fill out the form with your project details and the estimate window that works best for you.</p>
               </div>
               <span className="summary-step-cta">{content.primaryCtaLabel}</span>
             </Link>
             <article className="summary-step">
               <span className="step-number">2</span>
               <div>
-                <strong>Review the quote</strong>
-                <p>Look over the scope of work, pricing, and any deposit details before moving ahead.</p>
+                <strong>Watch for confirmation</strong>
+                <p>Rooted will review the request and send an email confirming the actual estimate day and time.</p>
               </div>
             </article>
             <article className="summary-step">
               <span className="step-number">3</span>
               <div>
-                <strong>Get scheduled</strong>
-                <p>Approve the work and Rooted will confirm the schedule and next steps with you.</p>
+                <strong>Meet and review the quote</strong>
+                <p>Rooted will meet with you, review the work, and send the quote so the job can move forward.</p>
               </div>
             </article>
           </div>
@@ -91,8 +91,8 @@ export function HomeContent() {
           <p className="eyebrow">Ready To Start</p>
           <h2>Get on the schedule for an estimate.</h2>
           <p className="hero-card-copy">
-            Send the project details once, choose an estimate window, and let Rooted follow up with
-            a quote and schedule.
+            Send the project details once, choose the estimate window that works best for you, and
+            watch for Rooted's confirmation email with the exact appointment time.
           </p>
           <div className="cta-panel-action">
             <Link href="/request-estimate" className="button-link">
