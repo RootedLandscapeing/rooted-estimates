@@ -369,9 +369,14 @@ export function Dashboard() {
   const quotedLeadHistory = useMemo(
     () =>
       estimateOptions.filter((estimate) =>
-        ["quote sent", "approved", "declined", "completed", "paid"].includes(estimate.status)
+        ["quote sent", "approved", "completed", "paid"].includes(estimate.status)
       ),
     [estimateOptions]
+  );
+
+  const visibleQuotes = useMemo(
+    () => data?.quotes.filter((quote) => quote.status !== "declined") ?? [],
+    [data]
   );
 
   const totals = useMemo(() => {
@@ -2625,7 +2630,7 @@ export function Dashboard() {
           <h2>Each quote needs a decision: approve it or remove the lead.</h2>
         </div>
         <div className="stack">
-          {data.quotes.map((quote) => {
+          {visibleQuotes.map((quote) => {
             const customer = data.customers.find((item) => item.id === quote.customerId);
             return (
               <article key={quote.id} className="list-card split-card action-card">
@@ -2706,6 +2711,9 @@ export function Dashboard() {
               </article>
             );
           })}
+          {!visibleQuotes.length ? (
+            <p className="empty-state">No active quotes right now.</p>
+          ) : null}
         </div>
       </section>
 
