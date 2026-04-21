@@ -142,6 +142,7 @@ export function Dashboard() {
   const quoteFormRef = useRef<HTMLFormElement | null>(null);
   const scheduleFormRef = useRef<HTMLFormElement | null>(null);
   const timeClockFormRef = useRef<HTMLFormElement | null>(null);
+  const paymentFormRef = useRef<HTMLFormElement | null>(null);
   const lastScrollYRef = useRef(0);
   const [data, setData] = useState<AppData | null>(null);
   const [activeSection, setActiveSection] = useState<AdminSection>("home");
@@ -1278,6 +1279,59 @@ export function Dashboard() {
     scrollToElement(timeClockFormRef.current);
   }
 
+  function openQuoteActions(quoteId: string) {
+    chooseAdminSection("leads");
+    window.setTimeout(() => {
+      const quoteSection = document.getElementById("quotes");
+      scrollToElement(quoteSection);
+      const quoteCard = document.getElementById(`quote-card-${quoteId}`);
+      if (quoteCard) {
+        quoteCard.scrollIntoView({ behavior: "smooth", block: "center" });
+      }
+    }, 80);
+  }
+
+  function openInvoiceActions(invoiceId: string) {
+    setPaymentInvoiceId(invoiceId);
+    chooseAdminSection("invoices");
+    scrollToElement(paymentFormRef.current);
+  }
+
+  function getTaskAction(task: Task) {
+    if (task.relatedInvoiceId) {
+      return {
+        label: "Open Invoice",
+        onClick: () => openInvoiceActions(task.relatedInvoiceId!)
+      };
+    }
+
+    if (task.relatedQuoteId) {
+      return {
+        label: "Open Quote",
+        onClick: () => openQuoteActions(task.relatedQuoteId!)
+      };
+    }
+
+    if (task.relatedLeadId) {
+      return {
+        label: "Schedule Estimate",
+        onClick: () => startEstimateSchedule(task.relatedLeadId!)
+      };
+    }
+
+    if (task.relatedJobId) {
+      const job = data?.jobs.find((item) => item.id === task.relatedJobId);
+      if (job) {
+        return {
+          label: "Open Job Timer",
+          onClick: () => startJobTimer(job.id, job.customerId)
+        };
+      }
+    }
+
+    return null;
+  }
+
   const navItems: Array<{ id: AdminSection; label: string; count?: number }> = [
     { id: "home", label: "Dashboard" },
     { id: "leads", label: "Leads / Estimates", count: pendingQuoteLeads.length },
@@ -1742,6 +1796,7 @@ export function Dashboard() {
         <div className="stack top-gap">
           {visibleTasks.map((task) => {
             const relationText = getTaskRelationText(task);
+            const taskAction = getTaskAction(task);
 
             return (
               <article
@@ -1766,6 +1821,15 @@ export function Dashboard() {
                   <span className={`pill ${task.status === "completed" ? "accent-pill" : ""}`}>
                     {taskStatusLabels[task.status]}
                   </span>
+                  {taskAction ? (
+                    <button
+                      type="button"
+                      className="button-secondary"
+                      onClick={taskAction.onClick}
+                    >
+                      {taskAction.label}
+                    </button>
+                  ) : null}
                   <select
                     value={task.status}
                     onChange={(event) => updateTaskStatus(task.id, event.target.value as TaskStatus)}
@@ -2633,7 +2697,7 @@ export function Dashboard() {
           {visibleQuotes.map((quote) => {
             const customer = data.customers.find((item) => item.id === quote.customerId);
             return (
-              <article key={quote.id} className="list-card split-card action-card">
+              <article key={quote.id} id={`quote-card-${quote.id}`} className="list-card split-card action-card">
                 <div className="card-copy">
                   <h3>{quote.projectTitle}</h3>
                   <p>{quote.customerName}</p>
@@ -2896,7 +2960,7 @@ export function Dashboard() {
           </div>
         ) : null}
 
-        <form className="form-grid top-gap" onSubmit={handleRecordPayment}>
+        <form className="form-grid top-gap" onSubmit={handleRecordPayment} ref={paymentFormRef}>
           <label>
             Invoice
             <select
