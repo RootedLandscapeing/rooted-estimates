@@ -1313,6 +1313,15 @@ export function Dashboard() {
     }
 
     if (task.relatedLeadId) {
+      const relatedEstimate = data?.estimateRequests.find((item) => item.id === task.relatedLeadId);
+
+      if (relatedEstimate && ["estimate scheduled", "estimate completed", "quote sent"].includes(relatedEstimate.status)) {
+        return {
+          label: "Open Quote Builder",
+          onClick: () => startLeadQuote(task.relatedLeadId!)
+        };
+      }
+
       return {
         label: "Schedule Estimate",
         onClick: () => startEstimateSchedule(task.relatedLeadId!)
