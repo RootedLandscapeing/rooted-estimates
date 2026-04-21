@@ -797,10 +797,6 @@ button.text-link {
   display: block;
 }
 
-.admin-content[data-active-section="home"] .summary-grid.dashboard-section {
-  display: grid;
-}
-
 .summary-card-button {
   display: block;
   width: 100%;
@@ -822,6 +818,39 @@ button.text-link {
   background: rgba(255, 244, 238, 0.9);
 }
 
+.today-work-panel {
+  border-color: rgba(125, 208, 16, 0.28);
+  background: linear-gradient(180deg, rgba(255, 250, 243, 0.92), rgba(238, 220, 170, 0.72));
+}
+
+.today-work-panel .section-heading h2 {
+  max-width: 18ch;
+}
+
+.home-work-footer {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-top: 1rem;
+}
+
+.home-summary-panel {
+  padding: 1.1rem;
+}
+
+.home-summary-panel .section-heading {
+  margin-bottom: 0.75rem;
+}
+
+.compact-summary-grid {
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+}
+
+.compact-summary-grid .summary-card strong {
+  font-size: 1.45rem;
+}
+
 .quick-actions-panel {
   overflow: hidden;
 }
@@ -830,6 +859,10 @@ button.text-link {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 1rem;
+}
+
+.compact-action-grid {
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
 }
 
 .action-tile {

@@ -1549,6 +1549,46 @@ export function Dashboard() {
   }
 
   const workflowTasks = getWorkflowTasks();
+  const homeManualTasks = [...taskBuckets.overdue, ...taskBuckets.today].slice(0, 3);
+
+  function renderWorkflowTaskCard(task: WorkflowTaskItem) {
+    return (
+      <article key={task.id} className="task-card workflow-task-card">
+        <div className="card-copy">
+          <div className="task-title-row">
+            <h3>{task.title}</h3>
+            <span className={`priority-pill ${task.priority}`}>
+              {taskPriorityLabels[task.priority]}
+            </span>
+          </div>
+          <p>{task.description}</p>
+          <div className="timestamp-list">
+            {task.meta.map((item) => (
+              <span key={`${task.id}-${item}`}>{item}</span>
+            ))}
+          </div>
+        </div>
+        <div className="action-stack">
+          {task.actions.map((action) => (
+            <button
+              key={`${task.id}-${action.label}`}
+              type="button"
+              className={
+                action.variant === "primary"
+                  ? "button-primary"
+                  : action.variant === "danger"
+                    ? "button-danger"
+                    : "button-secondary"
+              }
+              onClick={action.onClick}
+            >
+              {action.label}
+            </button>
+          ))}
+        </div>
+      </article>
+    );
+  }
 
   const navItems: Array<{ id: AdminSection; label: string; count?: number }> = [
     { id: "home", label: "Dashboard" },
@@ -1609,43 +1649,77 @@ export function Dashboard() {
       </aside>
 
       <div className="dashboard-grid admin-content" data-active-section={activeSection}>
-      <section className="panel quick-actions-panel dashboard-section" data-admin-section="home">
+      <section className="panel today-work-panel dashboard-section" data-admin-section="home">
         <div className="section-heading">
-          <p className="eyebrow">Quick Actions</p>
-          <h2>Jump straight to the next business task.</h2>
+          <p className="eyebrow">Today&apos;s Work</p>
+          <h2>Start with the next customer action.</h2>
+          <p className="section-intro">
+            This is the main operating checklist. The app looks at leads, quotes, jobs, and invoices,
+            then shows the next step your brother needs to take.
+          </p>
         </div>
-        <div className="quick-actions-grid">
+        <div className="stack">
+          {workflowTasks.slice(0, 5).map((task) => renderWorkflowTaskCard(task))}
+          {!workflowTasks.length ? (
+            <p className="empty-state">
+              No customer workflow tasks right now. New estimate requests, quote decisions, open jobs,
+              and unpaid invoices will appear here automatically.
+            </p>
+          ) : null}
+        </div>
+        {workflowTasks.length > 5 || homeManualTasks.length ? (
+          <div className="home-work-footer">
+            {workflowTasks.length > 5 ? (
+              <button type="button" className="button-secondary" onClick={() => chooseAdminSection("tasks")}>
+                View all workflow tasks
+              </button>
+            ) : null}
+            {homeManualTasks.length ? (
+              <button type="button" className="button-inline" onClick={() => chooseAdminSection("tasks")}>
+                Check {homeManualTasks.length} manual reminder{homeManualTasks.length === 1 ? "" : "s"}
+              </button>
+            ) : null}
+          </div>
+        ) : null}
+      </section>
+
+      <section className="panel home-summary-panel dashboard-section" data-admin-section="home">
+        <div className="section-heading compact-heading">
+          <p className="eyebrow">Business Snapshot</p>
+          <h2>Quick numbers without the clutter.</h2>
+        </div>
+        <div className="summary-grid compact-summary-grid">
           <button
             type="button"
-            className="action-tile action-tile-button"
+            className="summary-card summary-card-button"
             onClick={() => chooseAdminSection("leads")}
           >
-            <strong>Create Quote</strong>
-            <span>Price a lead and send the agreement.</span>
+            <span>Needs quote</span>
+            <strong>{totals.needsQuote}</strong>
           </button>
           <button
             type="button"
-            className="action-tile action-tile-button"
-            onClick={() => chooseAdminSection("leads")}
+            className="summary-card summary-card-button"
+            onClick={() => chooseAdminSection("jobs")}
           >
-            <strong>Review Quotes</strong>
-            <span>Approve, deny, or print the customer copy.</span>
+            <span>Active jobs</span>
+            <strong>{data.jobs.filter((job) => job.status !== "completed").length}</strong>
           </button>
           <button
             type="button"
-            className="action-tile action-tile-button"
+            className="summary-card summary-card-button"
             onClick={() => chooseAdminSection("invoices")}
           >
-            <strong>Record Payment</strong>
-            <span>Update invoices and move jobs into history.</span>
+            <span>Unpaid invoices</span>
+            <strong>{totals.unpaidInvoices}</strong>
           </button>
           <button
             type="button"
-            className="action-tile action-tile-button"
-            onClick={() => chooseAdminSection("settings")}
+            className="summary-card summary-card-button accent"
+            onClick={() => chooseAdminSection("time")}
           >
-            <strong>Log Expense</strong>
-            <span>Track receipts and tax-season costs quickly.</span>
+            <span>Time logged</span>
+            <strong>{formatMinutes(filteredTimeEntries.reduce((sum, entry) => sum + entry.minutes, 0))}</strong>
           </button>
         </div>
       </section>
@@ -1696,6 +1770,47 @@ export function Dashboard() {
           {!data.notifications.length ? (
             <p className="empty-state">New estimate request notifications will show up here.</p>
           ) : null}
+        </div>
+      </section>
+
+      <section className="panel quick-actions-panel dashboard-section" data-admin-section="home">
+        <div className="section-heading compact-heading">
+          <p className="eyebrow">Backup Shortcuts</p>
+          <h2>Use these when you need to jump somewhere manually.</h2>
+        </div>
+        <div className="quick-actions-grid compact-action-grid">
+          <button
+            type="button"
+            className="action-tile action-tile-button"
+            onClick={() => chooseAdminSection("leads")}
+          >
+            <strong>Create Quote</strong>
+            <span>Price a lead or customer job.</span>
+          </button>
+          <button
+            type="button"
+            className="action-tile action-tile-button"
+            onClick={() => chooseAdminSection("invoices")}
+          >
+            <strong>Record Payment</strong>
+            <span>Update an active invoice.</span>
+          </button>
+          <button
+            type="button"
+            className="action-tile action-tile-button"
+            onClick={() => chooseAdminSection("time")}
+          >
+            <strong>Start Timer</strong>
+            <span>Track where job time is going.</span>
+          </button>
+          <button
+            type="button"
+            className="action-tile action-tile-button"
+            onClick={() => chooseAdminSection("settings")}
+          >
+            <strong>Log Expense</strong>
+            <span>Save receipts and job costs.</span>
+          </button>
         </div>
       </section>
 
@@ -1955,37 +2070,6 @@ export function Dashboard() {
           </div>
         </section>
 
-      <section className="panel summary-grid dashboard-section" data-admin-section="home">
-        <button type="button" className="summary-card summary-card-button" onClick={() => chooseAdminSection("leads")}>
-          <span>New estimate requests</span>
-          <strong>{totals.totalLeads}</strong>
-        </button>
-        <button type="button" className="summary-card summary-card-button" onClick={() => chooseAdminSection("leads")}>
-          <span>Needs quote</span>
-          <strong>{totals.needsQuote}</strong>
-        </button>
-        <button type="button" className="summary-card summary-card-button" onClick={() => chooseAdminSection("jobs")}>
-          <span>Active jobs</span>
-          <strong>{data.jobs.filter((job) => job.status !== "completed").length}</strong>
-        </button>
-        <button type="button" className="summary-card summary-card-button" onClick={() => chooseAdminSection("invoices")}>
-          <span>Unpaid invoices</span>
-          <strong>{totals.unpaidInvoices}</strong>
-        </button>
-        <button type="button" className="summary-card summary-card-button attention" onClick={() => chooseAdminSection("tasks")}>
-          <span>Workflow tasks</span>
-          <strong>{workflowTasks.length}</strong>
-        </button>
-        <button type="button" className="summary-card summary-card-button accent" onClick={() => chooseAdminSection("tasks")}>
-          <span>Manual reminders</span>
-          <strong>{taskBuckets.week.length}</strong>
-        </button>
-        <button type="button" className="summary-card summary-card-button" onClick={() => chooseAdminSection("time")}>
-          <span>Time logged</span>
-          <strong>{formatMinutes(filteredTimeEntries.reduce((sum, entry) => sum + entry.minutes, 0))}</strong>
-        </button>
-      </section>
-
       <section className="panel dashboard-section" data-admin-section="tasks">
         <div className="section-heading">
           <p className="eyebrow">Tasks and Reminders</p>
@@ -1993,42 +2077,7 @@ export function Dashboard() {
         </div>
 
         <div className="stack top-gap">
-          {workflowTasks.map((task) => (
-            <article key={task.id} className="task-card">
-              <div className="card-copy">
-                <div className="task-title-row">
-                  <h3>{task.title}</h3>
-                  <span className={`priority-pill ${task.priority}`}>
-                    {taskPriorityLabels[task.priority]}
-                  </span>
-                </div>
-                <p>{task.description}</p>
-                <div className="timestamp-list">
-                  {task.meta.map((item) => (
-                    <span key={`${task.id}-${item}`}>{item}</span>
-                  ))}
-                </div>
-              </div>
-              <div className="action-stack">
-                {task.actions.map((action) => (
-                  <button
-                    key={`${task.id}-${action.label}`}
-                    type="button"
-                    className={
-                      action.variant === "primary"
-                        ? "button-primary"
-                        : action.variant === "danger"
-                          ? "button-danger"
-                          : "button-secondary"
-                    }
-                    onClick={action.onClick}
-                  >
-                    {action.label}
-                  </button>
-                ))}
-              </div>
-            </article>
-          ))}
+          {workflowTasks.map((task) => renderWorkflowTaskCard(task))}
           {!workflowTasks.length ? (
             <p className="empty-state">No active workflow tasks right now.</p>
           ) : null}
