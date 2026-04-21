@@ -21,6 +21,7 @@ import {
   markNotificationsRead,
   recordExpense,
   recordPayment,
+  reviseQuote,
   saveAppData,
   scheduleEstimate,
   sendQuote,
@@ -74,6 +75,21 @@ type LaborEntry = {
   customAction: string;
   people: string;
   hours: string;
+};
+
+type WorkflowTaskAction = {
+  label: string;
+  onClick: () => void;
+  variant?: "primary" | "secondary" | "danger";
+};
+
+type WorkflowTaskItem = {
+  id: string;
+  title: string;
+  description: string;
+  meta: string[];
+  priority: TaskPriority;
+  actions: WorkflowTaskAction[];
 };
 
 function createLaborEntry(idSuffix: string): LaborEntry {
@@ -159,6 +175,10 @@ export function Dashboard() {
   const [depositAmount, setDepositAmount] = useState("");
   const [depositPercent, setDepositPercent] = useState("");
   const [contractorSignature, setContractorSignature] = useState("Rooted Representative");
+  const [revisionQuoteId, setRevisionQuoteId] = useState("");
+  const [revisionDescription, setRevisionDescription] = useState("");
+  const [revisionQty, setRevisionQty] = useState("1");
+  const [revisionUnitPrice, setRevisionUnitPrice] = useState("");
   const [paymentInvoiceId, setPaymentInvoiceId] = useState("");
   const [paymentAmount, setPaymentAmount] = useState("");
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("cash");
@@ -427,13 +447,23 @@ export function Dashboard() {
     const weekEndDate = new Date();
     weekEndDate.setDate(weekEndDate.getDate() + 7);
     const weekEnd = weekEndDate.toISOString().slice(0, 10);
-    const openTasks = data?.tasks.filter((task) => task.status !== "completed") ?? [];
+    const manualTasks =
+      data?.tasks.filter(
+        (task) =>
+          !task.relatedLeadId &&
+          !task.relatedQuoteId &&
+          !task.relatedInvoiceId &&
+          task.status !== "completed"
+      ) ?? [];
+    const allManualTasks =
+      data?.tasks.filter((task) => !task.relatedLeadId && !task.relatedQuoteId && !task.relatedInvoiceId) ??
+      [];
 
     return {
-      today: openTasks.filter((task) => task.dueDate === today),
-      week: openTasks.filter((task) => task.dueDate >= today && task.dueDate <= weekEnd),
-      overdue: openTasks.filter((task) => task.dueDate < today),
-      all: data?.tasks ?? []
+      today: manualTasks.filter((task) => task.dueDate === today),
+      week: manualTasks.filter((task) => task.dueDate >= today && task.dueDate <= weekEnd),
+      overdue: manualTasks.filter((task) => task.dueDate < today),
+      all: allManualTasks
     };
   }, [data]);
 
@@ -784,6 +814,25 @@ export function Dashboard() {
 
       return current.filter((entry) => entry.id !== id);
     });
+  }
+
+  function handleReviseQuote(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!data || !revisionQuoteId) {
+      return;
+    }
+
+    const nextData = reviseQuote(data, revisionQuoteId, {
+      description: revisionDescription,
+      qty: Number(revisionQty || 0),
+      unitPrice: Number(revisionUnitPrice || 0)
+    });
+
+    persist(nextData);
+    setRevisionQuoteId("");
+    setRevisionDescription("");
+    setRevisionQty("1");
+    setRevisionUnitPrice("");
   }
 
   function handleCreateQuote(event: React.FormEvent<HTMLFormElement>) {
@@ -1297,6 +1346,164 @@ export function Dashboard() {
     scrollToElement(paymentFormRef.current);
   }
 
+  function getWorkflowTasks(): WorkflowTaskItem[] {
+    if (!data) {
+      return [];
+    }
+
+    const tasks: WorkflowTaskItem[] = [];
+
+    data.estimateRequests.forEach((estimate) => {
+      const customer = data.customers.find((item) => item.id === estimate.customerId);
+      const relatedQuotes = data.quotes.filter(
+        (quote) => quote.estimateRequestId === estimate.id && quote.status !== "declined"
+      );
+      const activeQuote = relatedQuotes[0];
+
+      if (estimate.status === "new lead" && !activeQuote) {
+        tasks.push({
+          id: `workflow-schedule-${estimate.id}`,
+          title: `Schedule estimate for ${customer?.fullName ?? estimate.jobType}`,
+          description: `Customer requested ${estimate.preferredSlot}. Send the confirmation email with the real appointment time.`,
+          meta: [estimate.jobType, estimate.serviceAddress],
+          priority: "high",
+          actions: [
+            {
+              label: "Schedule Estimate",
+              variant: "primary",
+              onClick: () => startEstimateSchedule(estimate.id)
+            }
+          ]
+        });
+        return;
+      }
+
+      if (
+        !activeQuote &&
+        ["estimate scheduled", "estimate completed"].includes(estimate.status)
+      ) {
+        tasks.push({
+          id: `workflow-quote-${estimate.id}`,
+          title: `Create quote for ${customer?.fullName ?? estimate.jobType}`,
+          description: "The estimate has been scheduled or completed. Build the quote from the customer request.",
+          meta: [estimate.jobType, estimate.serviceAddress],
+          priority: "high",
+          actions: [
+            {
+              label: "Create Quote",
+              variant: "primary",
+              onClick: () => startLeadQuote(estimate.id)
+            }
+          ]
+        });
+      }
+    });
+
+    data.quotes.forEach((quote) => {
+      if (quote.status === "declined" || quote.status === "completed") {
+        return;
+      }
+
+      if (quote.status === "draft") {
+        tasks.push({
+          id: `workflow-send-quote-${quote.id}`,
+          title: `Send quote for ${quote.projectTitle}`,
+          description: "The quote is drafted. Mark it sent once your brother has given the customer the quote.",
+          meta: [quote.customerName, `$${quote.total.toFixed(2)}`],
+          priority: "normal",
+          actions: [
+            {
+              label: "Open Quote",
+              onClick: () => openQuoteActions(quote.id)
+            },
+            {
+              label: "Mark Sent",
+              variant: "primary",
+              onClick: () => persist(sendQuote(data, quote.id))
+            }
+          ]
+        });
+        return;
+      }
+
+      if (quote.status === "sent") {
+        tasks.push({
+          id: `workflow-decision-${quote.id}`,
+          title: `Confirm quote decision for ${quote.customerName}`,
+          description: "Find out whether the customer is on board with the quote, then approve or deny it.",
+          meta: [quote.projectTitle, `$${quote.total.toFixed(2)}`],
+          priority: "high",
+          actions: [
+            {
+              label: "Approve",
+              variant: "primary",
+              onClick: () => persist(approveQuote(data, quote.id))
+            },
+            {
+              label: "Deny",
+              variant: "danger",
+              onClick: () => persist(declineQuote(data, quote.id))
+            },
+            {
+              label: "Open Quote",
+              onClick: () => openQuoteActions(quote.id)
+            }
+          ]
+        });
+        return;
+      }
+
+      if (quote.status === "approved") {
+        const job = data.jobs.find((item) => item.quoteId === quote.id);
+        if (!job || job.status === "completed") {
+          return;
+        }
+
+        tasks.push({
+          id: `workflow-job-${job.id}`,
+          title: `Do the work for ${quote.customerName}`,
+          description: "The quote is approved. Track time if helpful, then complete the job when the work is finished.",
+          meta: [job.title, `Scheduled ${job.scheduledDate}`],
+          priority: "normal",
+          actions: [
+            {
+              label: "Start Timer",
+              onClick: () => startJobTimer(job.id, job.customerId)
+            },
+            {
+              label: "Complete Job",
+              variant: "primary",
+              onClick: () => persist(completeJobAndCreateInvoice(data, job.id))
+            }
+          ]
+        });
+      }
+    });
+
+    activeInvoices.forEach((invoice) => {
+      if (invoice.status === "void" || invoice.status === "paid") {
+        return;
+      }
+
+      tasks.push({
+        id: `workflow-payment-${invoice.id}`,
+        title: `Collect payment for ${invoice.customerName}`,
+        description: "The invoice is open. Record full or partial payment when money is collected.",
+        meta: [invoice.projectTitle, `$${invoice.balanceDue.toFixed(2)} due`],
+        priority: invoice.status === "overdue" ? "high" : "normal",
+        actions: [
+          {
+            label: "Collect Payment",
+            variant: "primary",
+            onClick: () => openInvoiceActions(invoice.id)
+          }
+        ]
+      });
+    });
+
+    return tasks;
+  }
+
   function getTaskAction(task: Task) {
     if (task.relatedInvoiceId) {
       return {
@@ -1341,11 +1548,13 @@ export function Dashboard() {
     return null;
   }
 
+  const workflowTasks = getWorkflowTasks();
+
   const navItems: Array<{ id: AdminSection; label: string; count?: number }> = [
     { id: "home", label: "Dashboard" },
     { id: "leads", label: "Leads / Estimates", count: pendingQuoteLeads.length },
     { id: "jobs", label: "Jobs / Projects", count: data.jobs.length },
-    { id: "tasks", label: "Tasks / Reminders", count: taskBuckets.overdue.length + taskBuckets.today.length },
+    { id: "tasks", label: "Tasks / Reminders", count: workflowTasks.length + taskBuckets.overdue.length + taskBuckets.today.length },
     { id: "time", label: "Time Clock", count: data.timeEntries.filter((entry) => entry.isRunning).length },
     { id: "customers", label: "Customers", count: activeCustomers.length },
     { id: "invoices", label: "Invoices / Payments", count: activeInvoices.length },
@@ -1764,11 +1973,11 @@ export function Dashboard() {
           <strong>{totals.unpaidInvoices}</strong>
         </button>
         <button type="button" className="summary-card summary-card-button attention" onClick={() => chooseAdminSection("tasks")}>
-          <span>Overdue tasks</span>
-          <strong>{taskBuckets.overdue.length}</strong>
+          <span>Workflow tasks</span>
+          <strong>{workflowTasks.length}</strong>
         </button>
         <button type="button" className="summary-card summary-card-button accent" onClick={() => chooseAdminSection("tasks")}>
-          <span>Tasks due this week</span>
+          <span>Manual reminders</span>
           <strong>{taskBuckets.week.length}</strong>
         </button>
         <button type="button" className="summary-card summary-card-button" onClick={() => chooseAdminSection("time")}>
@@ -1780,7 +1989,54 @@ export function Dashboard() {
       <section className="panel dashboard-section" data-admin-section="tasks">
         <div className="section-heading">
           <p className="eyebrow">Tasks and Reminders</p>
-          <h2>Keep follow-ups, estimate reminders, and payment checks in one place.</h2>
+          <h2>Work the next step automatically, then keep manual reminders underneath.</h2>
+        </div>
+
+        <div className="stack top-gap">
+          {workflowTasks.map((task) => (
+            <article key={task.id} className="task-card">
+              <div className="card-copy">
+                <div className="task-title-row">
+                  <h3>{task.title}</h3>
+                  <span className={`priority-pill ${task.priority}`}>
+                    {taskPriorityLabels[task.priority]}
+                  </span>
+                </div>
+                <p>{task.description}</p>
+                <div className="timestamp-list">
+                  {task.meta.map((item) => (
+                    <span key={`${task.id}-${item}`}>{item}</span>
+                  ))}
+                </div>
+              </div>
+              <div className="action-stack">
+                {task.actions.map((action) => (
+                  <button
+                    key={`${task.id}-${action.label}`}
+                    type="button"
+                    className={
+                      action.variant === "primary"
+                        ? "button-primary"
+                        : action.variant === "danger"
+                          ? "button-danger"
+                          : "button-secondary"
+                    }
+                    onClick={action.onClick}
+                  >
+                    {action.label}
+                  </button>
+                ))}
+              </div>
+            </article>
+          ))}
+          {!workflowTasks.length ? (
+            <p className="empty-state">No active workflow tasks right now.</p>
+          ) : null}
+        </div>
+
+        <div className="section-heading compact-heading top-gap">
+          <p className="eyebrow">Manual Reminders</p>
+          <h2>Extra reminders that are not part of the automatic customer workflow.</h2>
         </div>
 
         <div className="task-filter-row" aria-label="Task views">
@@ -2768,6 +3024,20 @@ export function Dashboard() {
                     {quote.status === "approved" ? (
                       <button
                         type="button"
+                        className="button-secondary"
+                        onClick={() => {
+                          setRevisionQuoteId(quote.id);
+                          setRevisionDescription("");
+                          setRevisionQty("1");
+                          setRevisionUnitPrice("");
+                        }}
+                      >
+                        Revise Quote
+                      </button>
+                    ) : null}
+                    {quote.status === "approved" ? (
+                      <button
+                        type="button"
                         className="button-primary"
                         onClick={() => {
                           const job = data.jobs.find((item) => item.quoteId === quote.id);
@@ -2780,6 +3050,57 @@ export function Dashboard() {
                       </button>
                     ) : null}
                   </div>
+                  {revisionQuoteId === quote.id ? (
+                    <form className="revision-form" onSubmit={handleReviseQuote}>
+                      <label>
+                        Added work or price change
+                        <input
+                          value={revisionDescription}
+                          onChange={(event) => setRevisionDescription(event.target.value)}
+                          placeholder="Additional tree trimming, extra debris removal..."
+                          required
+                        />
+                      </label>
+                      <label>
+                        Qty / hours
+                        <input
+                          type="number"
+                          min="0.01"
+                          step="0.25"
+                          value={revisionQty}
+                          onChange={(event) => setRevisionQty(event.target.value)}
+                          required
+                        />
+                      </label>
+                      <label>
+                        Unit price
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={revisionUnitPrice}
+                          onChange={(event) => setRevisionUnitPrice(event.target.value)}
+                          placeholder="0.00"
+                          required
+                        />
+                      </label>
+                      <div className="inline-actions">
+                        <button type="submit" className="button-primary">
+                          Add Change Order
+                        </button>
+                        <button
+                          type="button"
+                          className="button-secondary"
+                          onClick={() => setRevisionQuoteId("")}
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                      <p className="status-note">
+                        This adds a documented change-order line to the quote. The invoice will use the revised quote total when the job is completed.
+                      </p>
+                    </form>
+                  ) : null}
                 </div>
               </article>
             );

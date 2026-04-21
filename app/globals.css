@@ -1099,6 +1099,16 @@ textarea {
   font-size: 1.25rem;
 }
 
+.revision-form {
+  display: grid;
+  gap: 0.75rem;
+  margin-top: 0.9rem;
+  padding: 0.9rem;
+  border-radius: 16px;
+  border: 1px solid rgba(16, 17, 15, 0.08);
+  background: rgba(255, 250, 243, 0.72);
+}
+
 .notice {
   margin-bottom: 1rem;
   padding: 1rem;

@@ -485,6 +485,57 @@ export function approveQuote(
   };
 }
 
+export function reviseQuote(
+  data: AppData,
+  quoteId: string,
+  payload: {
+    description: string;
+    qty: number;
+    unitPrice: number;
+  }
+): AppData {
+  const quote = data.quotes.find((item) => item.id === quoteId);
+  const description = payload.description.trim();
+  const amount = payload.qty * payload.unitPrice;
+
+  if (!quote || !description || payload.qty <= 0 || payload.unitPrice < 0 || amount <= 0) {
+    return data;
+  }
+
+  const lineItem: QuoteLineItem = {
+    id: makeId("line-change"),
+    description: description.toLowerCase().startsWith("change order:")
+      ? description
+      : `Change Order: ${description}`,
+    qty: payload.qty,
+    unitPrice: payload.unitPrice,
+    amount
+  };
+
+  return {
+    ...data,
+    quotes: data.quotes.map((item) => {
+      if (item.id !== quoteId) {
+        return item;
+      }
+
+      const items = [...item.items, lineItem];
+      const subtotal = items.reduce((sum, currentItem) => sum + currentItem.amount, 0);
+      const depositAmount =
+        item.depositType === "percent" && item.depositPercent
+          ? (subtotal * item.depositPercent) / 100
+          : item.depositAmount;
+
+      return {
+        ...item,
+        items,
+        total: subtotal,
+        depositAmount
+      };
+    })
+  };
+}
+
 export function declineQuote(data: AppData, quoteId: string): AppData {
   const quote = data.quotes.find((item) => item.id === quoteId);
   if (!quote || quote.status !== "sent") {
